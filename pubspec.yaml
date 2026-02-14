@@ -1,5 +1,5 @@
-name: rlsb_mis_app
-description: MIS Dispatch App with Clean Architecture
+name: rlsb_dispatch_app
+description: PDRRMO First Responder Dispatch App
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -16,26 +16,43 @@ dependencies:
   # Networking
   dio: ^5.0.0
 
-  # Secure Storage
-  flutter_secure_storage: ^9.0.0
+  # Local Storage
+  shared_preferences: ^2.2.0
 
   # Routing
   go_router: ^7.0.0
 
-  # UI Utilities
-  flutter_screenutil: ^5.9.0
-  velocity_x: ^4.0.0
+  # UI
+  flutter_svg: ^2.0.7
+  cached_network_image: ^3.3.0
 
-  # Functional Programming
-  dartz: ^0.10.1
+  # Media
+  image_picker: ^1.0.4
 
-  # Dependency Injection
-  get_it: ^7.6.0
+  # Location
+  geolocator: ^10.1.0
+
+  # Notifications
+  onesignal_flutter: ^5.0.0
+  flutter_local_notifications: ^16.1.0
+
+  # Local Database
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Serialization
+  json_annotation: ^4.8.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
+  json_serializable: ^6.7.1
+  build_runner: ^2.4.6
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/images/body_front.png
+    - assets/images/body_back.png
