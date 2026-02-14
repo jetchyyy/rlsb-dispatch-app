@@ -1,0 +1,41 @@
+name: rlsb_mis_app
+description: MIS Dispatch App with Clean Architecture
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  provider: ^6.0.0
+
+  # Networking
+  dio: ^5.0.0
+
+  # Secure Storage
+  flutter_secure_storage: ^9.0.0
+
+  # Routing
+  go_router: ^7.0.0
+
+  # UI Utilities
+  flutter_screenutil: ^5.9.0
+  velocity_x: ^4.0.0
+
+  # Functional Programming
+  dartz: ^0.10.1
+
+  # Dependency Injection
+  get_it: ^7.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
