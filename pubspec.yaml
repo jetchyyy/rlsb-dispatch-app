@@ -34,7 +34,7 @@ dependencies:
 
   # Notifications
   onesignal_flutter: ^5.0.0
-  flutter_local_notifications: ^16.1.0
+  # flutter_local_notifications: ^16.1.0  # Temporarily disabled due to build issue
 
   # Local Database
   hive: ^2.2.3
