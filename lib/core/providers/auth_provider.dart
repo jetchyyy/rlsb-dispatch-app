@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../models/responder.dart';
@@ -104,13 +105,58 @@ class AuthProvider extends ChangeNotifier {
   // ── Helpers ────────────────────────────────────────────────
 
   String _parseError(dynamic e) {
+    // Handle DioException specifically
+    if (e is DioException) {
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout) {
+        return 'Connection timeout. Please check your internet.';
+      }
+      
+      if (e.type == DioExceptionType.connectionError) {
+        return 'No internet connection. Please check your network.';
+      }
+
+      // HTTP errors
+      final statusCode = e.response?.statusCode;
+      if (statusCode != null) {
+        switch (statusCode) {
+          case 401:
+            return 'Invalid email or password.';
+          case 404:
+            return 'Login endpoint not found. Please contact support.';
+          case 422:
+            // Validation error - try to get the message from response
+            final data = e.response?.data;
+            if (data is Map && data['message'] != null) {
+              return data['message'].toString();
+            }
+            return 'Invalid credentials format.';
+          case 500:
+            return 'Server error. Please try again later.';
+          default:
+            return 'Login failed (Error $statusCode). Please try again.';
+        }
+      }
+
+      // Other network errors
+      if (e.message?.contains('SocketException') ?? false) {
+        return 'Cannot reach server. Check your connection.';
+      }
+
+      return 'Network error: ${e.message ?? "Unknown error"}';
+    }
+    
+    // Generic exception handling
     if (e is Exception) {
       final msg = e.toString();
       if (msg.contains('401')) return 'Invalid email or password.';
-      if (msg.contains('SocketException') || msg.contains('connection'))
+      if (msg.contains('SocketException') || msg.contains('connection')) {
         return 'No internet connection.';
+      }
       return 'Login failed. Please try again.';
     }
+    
     return 'An unexpected error occurred.';
   }
 }

@@ -3,8 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/providers/auth_provider.dart';
-import '../../../core/widgets/custom_button.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -12,7 +11,7 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
-    final responder = authProvider.responder;
+    final user = authProvider.user;
 
     return Scaffold(
       appBar: AppBar(
@@ -34,37 +33,57 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              responder?.name ?? 'Responder',
+              user?.name ?? 'Dispatcher',
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
               ),
             ),
             Text(
-              responder?.email ?? '',
+              user?.email ?? '',
               style: const TextStyle(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 32),
 
             // ── Info Cards ─────────────────────────────────
-            _infoTile(Icons.badge, 'Badge', responder?.badge ?? 'N/A'),
-            _infoTile(Icons.phone, 'Phone', responder?.phone ?? 'N/A'),
-            _infoTile(Icons.group, 'Team', responder?.team ?? 'N/A'),
-            _infoTile(Icons.security, 'Role', responder?.role ?? 'N/A'),
-            _infoTile(Icons.circle,
-                'Status', responder?.status ?? 'N/A'),
+            _infoTile(Icons.badge, 'ID Number', user?.idNumber ?? 'N/A'),
+            _infoTile(Icons.business, 'Division', user?.division ?? 'N/A'),
+            _infoTile(Icons.work, 'Position', user?.position ?? 'N/A'),
+            _infoTile(Icons.phone, 'Phone', user?.phoneNumber ?? 'N/A'),
+            _infoTile(Icons.security, 'Roles',
+                user?.roles.join(', ') ?? 'N/A'),
             const SizedBox(height: 32),
 
             // ── Logout ─────────────────────────────────────
-            CustomButton(
-              text: 'Logout',
-              icon: Icons.logout,
-              backgroundColor: AppColors.error,
-              isLoading: authProvider.isLoading,
-              onPressed: () async {
-                await authProvider.logout();
-                if (context.mounted) context.go('/login');
-              },
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: authProvider.isLoading
+                    ? null
+                    : () async {
+                        await authProvider.logout();
+                        if (context.mounted) context.go('/login');
+                      },
+                icon: authProvider.isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.logout),
+                label: Text(authProvider.isLoading ? 'Logging out...' : 'Logout'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

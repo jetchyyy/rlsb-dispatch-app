@@ -23,15 +23,36 @@ class AuthService {
 
     final data = response.data as Map<String, dynamic>;
 
-    // Store token
-    final token = data['token'] as String;
+    // Check if API returned success:false
+    if (data['success'] == false) {
+      throw Exception(data['message'] ?? 'Login failed');
+    }
+
+    // Extract token - try different possible keys
+    final token = (data['token'] ?? data['access_token']) as String?;
+    if (token == null) {
+      throw Exception('No authentication token received from server');
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(ApiConstants.tokenKey, token);
 
+    // Extract user/responder data - try different possible structures
+    Map<String, dynamic>? userData;
+    if (data['responder'] != null) {
+      userData = data['responder'] as Map<String, dynamic>;
+    } else if (data['user'] != null) {
+      userData = data['user'] as Map<String, dynamic>;
+    } else if (data['data'] != null && data['data']['user'] != null) {
+      userData = data['data']['user'] as Map<String, dynamic>;
+    } else if (data['data'] != null && data['data']['responder'] != null) {
+      userData = data['data']['responder'] as Map<String, dynamic>;
+    } else {
+      throw Exception('No user data received from server');
+    }
+
     // Parse and store responder
-    final responder = Responder.fromJson(
-      data['responder'] as Map<String, dynamic>,
-    );
+    final responder = Responder.fromJson(userData);
     await prefs.setString(ApiConstants.userKey, jsonEncode(responder.toJson()));
 
     return responder;

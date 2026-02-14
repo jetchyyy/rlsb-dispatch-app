@@ -3,12 +3,14 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'core/constants/app_colors.dart';
-import 'core/providers/auth_provider.dart';
+import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
-import 'features/incident/screens/assignment_action_screen.dart';
-import 'features/incident/screens/incident_detail_screen.dart';
-import 'features/injury_mapper/screens/injury_mapper_screen.dart';
+import 'features/incidents/screens/incidents_list_screen.dart';
+import 'features/incidents/screens/incident_detail_screen.dart';
+import 'features/incidents/screens/create_incident_screen.dart';
+import 'features/incidents/screens/analytics_screen.dart';
+import 'features/map/screens/live_map_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
 
 class App extends StatelessWidget {
@@ -64,42 +66,42 @@ class App extends StatelessWidget {
           builder: (context, state) => const DashboardScreen(),
         ),
 
+        // ── Incidents List ─────────────────────────────────
+        GoRoute(
+          path: '/incidents',
+          name: 'incidents',
+          builder: (context, state) => const IncidentsListScreen(),
+        ),
+
+        // ── Create Incident ────────────────────────────────
+        GoRoute(
+          path: '/incidents/create',
+          name: 'createIncident',
+          builder: (context, state) => const CreateIncidentScreen(),
+        ),
+
         // ── Incident Detail ────────────────────────────────
         GoRoute(
-          path: '/incident/:id',
+          path: '/incidents/:id',
           name: 'incidentDetail',
           builder: (context, state) {
-            final id = int.parse(state.pathParameters['id']!);
+            final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
             return IncidentDetailScreen(incidentId: id);
           },
-          routes: [
-            // ── Assignment Action ────────────────────────────
-            GoRoute(
-              path: 'assignment/:assignmentId',
-              name: 'assignmentAction',
-              builder: (context, state) {
-                final incidentId =
-                    int.parse(state.pathParameters['id']!);
-                final assignmentId =
-                    int.parse(state.pathParameters['assignmentId']!);
-                return AssignmentActionScreen(
-                  incidentId: incidentId,
-                  assignmentId: assignmentId,
-                );
-              },
-            ),
+        ),
 
-            // ── Injury Mapper ────────────────────────────────
-            GoRoute(
-              path: 'injury-mapper',
-              name: 'injuryMapper',
-              builder: (context, state) {
-                final incidentId =
-                    int.parse(state.pathParameters['id']!);
-                return InjuryMapperScreen(incidentId: incidentId);
-              },
-            ),
-          ],
+        // ── Analytics ──────────────────────────────────────
+        GoRoute(
+          path: '/analytics',
+          name: 'analytics',
+          builder: (context, state) => const AnalyticsScreen(),
+        ),
+
+        // ── Live Map ───────────────────────────────────────
+        GoRoute(
+          path: '/map',
+          name: 'map',
+          builder: (context, state) => const LiveMapScreen(),
         ),
 
         // ── Profile ────────────────────────────────────────

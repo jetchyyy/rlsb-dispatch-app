@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../core/constants/app_colors.dart';
-import '../../../core/models/assignment.dart';
-import '../../../core/providers/auth_provider.dart';
 import '../../../core/providers/incident_provider.dart';
-import '../../../core/widgets/loading_indicator.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,21 +18,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch assignments on first load
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<IncidentProvider>().fetchAssignments();
+      final auth = context.read<AuthProvider>();
+      if (auth.isAuthenticated) {
+        final provider = context.read<IncidentProvider>();
+        provider.fetchIncidents();
+        provider.fetchStatistics();
+        provider.startAutoRefresh();
+      }
     });
   }
 
   @override
+  void dispose() {
+    // Auto-refresh is stopped by provider.dispose or stopAutoRefresh
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final incidentProvider = context.watch<IncidentProvider>();
     final authProvider = context.watch<AuthProvider>();
+    final ip = context.watch<IncidentProvider>();
+    final user = authProvider.user;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PDRRMO First Responder'),
+        title: const Text('PDRRMO Dispatch'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () {
+              ip.fetchIncidents();
+              ip.fetchStatistics();
+            },
+          ),
           IconButton(
             icon: const CircleAvatar(
               radius: 16,
@@ -44,198 +63,508 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () => incidentProvider.fetchAssignments(),
-        child: incidentProvider.isLoading && incidentProvider.assignments.isEmpty
-            ? const LoadingIndicator(message: 'Loading assignments…')
-            : incidentProvider.assignments.isEmpty
-                ? _buildEmptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: incidentProvider.assignments.length,
-                    itemBuilder: (context, index) {
-                      final assignment = incidentProvider.assignments[index];
-                      return _AssignmentCard(
-                        assignment: assignment,
-                        onTap: () {
-                          context.push(
-                            '/incident/${assignment.incidentId ?? assignment.id}',
-                          );
-                        },
-                      );
-                    },
-                  ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/incidents/create'),
+        icon: const Icon(Icons.add),
+        label: const Text('New Incident'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
       ),
-    );
-  }
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await Future.wait([
+            ip.fetchIncidents(),
+            ip.fetchStatistics(),
+          ]);
+        },
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 100),
+          children: [
+            // ── Welcome Header ───────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Welcome, ${user?.name ?? 'Staff'}!',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    user?.position != null
+                        ? '${user!.position} • ${user.division ?? ""}'
+                        : user?.roleLabel ?? 'Staff',
+                    style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
 
-  Widget _buildEmptyState() {
-    return ListView(
-      children: [
-        SizedBox(
-          height: MediaQuery.of(context).size.height * 0.7,
-          child: const Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.assignment_outlined,
-                    size: 72, color: AppColors.textHint),
-                SizedBox(height: 16),
-                Text(
-                  'No assignments yet',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: AppColors.textSecondary,
+            // ── Stat Cards (2x2 Grid) ────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 1.7,
+                children: [
+                  _StatCard(
+                    title: 'Active',
+                    value: ip.activeCount.toString(),
+                    icon: Icons.radio_button_checked,
+                    color: AppColors.severityCritical,
+                    isLoading: ip.isLoading,
+                  ),
+                  _StatCard(
+                    title: 'New',
+                    value: ip.newCount.toString(),
+                    icon: Icons.fiber_new,
+                    color: const Color(0xFFEA580C),
+                    isLoading: ip.isLoading,
+                    pulse: ip.newCount > 0,
+                  ),
+                  _StatCard(
+                    title: 'Critical',
+                    value: ip.criticalCount.toString(),
+                    icon: Icons.warning_amber_rounded,
+                    color: const Color(0xFFB91C1C),
+                    isLoading: ip.isLoading,
+                  ),
+                  _StatCard(
+                    title: "Today's Total",
+                    value: ip.todayTotal.toString(),
+                    icon: Icons.info_outline,
+                    color: AppColors.info,
+                    isLoading: ip.isLoading,
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Quick Actions ────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+              child: Text(
+                'Quick Actions',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 88,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  _QuickAction(
+                    icon: Icons.list_alt,
+                    label: 'All Incidents',
+                    color: AppColors.primary,
+                    onTap: () => context.push('/incidents'),
+                  ),
+                  _QuickAction(
+                    icon: Icons.map_outlined,
+                    label: 'Live Map',
+                    color: const Color(0xFF06B6D4),
+                    onTap: () => context.push('/map'),
+                  ),
+                  _QuickAction(
+                    icon: Icons.analytics_outlined,
+                    label: 'Analytics',
+                    color: const Color(0xFF8B5CF6),
+                    onTap: () => context.push('/analytics'),
+                  ),
+                  _QuickAction(
+                    icon: Icons.add_circle_outline,
+                    label: 'Report',
+                    color: AppColors.severityCritical,
+                    onTap: () => context.push('/incidents/create'),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Error Banner ─────────────────────────────
+            if (ip.errorMessage != null) ...[
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: AppColors.error, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(ip.errorMessage!,
+                          style: const TextStyle(color: AppColors.error, fontSize: 13)),
+                    ),
+                    TextButton(
+                      onPressed: () => ip.fetchIncidents(),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // ── Recent Incidents Timeline ─────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Recent Incidents',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  if (ip.incidents.isNotEmpty)
+                    TextButton(
+                      onPressed: () => context.push('/incidents'),
+                      child: const Text('View All'),
+                    ),
+                ],
+              ),
+            ),
+
+            if (ip.isLoading && ip.incidents.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (ip.incidents.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.assignment_outlined, size: 56, color: Colors.grey.shade300),
+                      const SizedBox(height: 12),
+                      const Text('No incidents found', style: TextStyle(color: AppColors.textSecondary)),
+                      const SizedBox(height: 4),
+                      const Text('Pull down to refresh', style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+                    ],
                   ),
                 ),
-                SizedBox(height: 8),
-                Text(
-                  'Pull down to refresh',
-                  style: TextStyle(color: AppColors.textHint),
+              )
+            else
+              ...ip.incidents.take(5).map((incident) {
+                return _RecentIncidentCard(
+                  incident: incident,
+                  onTap: () {
+                    final id = incident['id'];
+                    if (id != null) context.push('/incidents/$id');
+                  },
+                );
+              }),
+
+            // ── Last updated ─────────────────────────────
+            if (ip.lastFetchTime != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Center(
+                  child: Text(
+                    'Last updated ${timeago.format(ip.lastFetchTime!)}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                  ),
                 ),
-              ],
-            ),
-          ),
+              ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
 
-// ─── Assignment Card ─────────────────────────────────────────
+// ─── Stat Card ───────────────────────────────────────────────
 
-class _AssignmentCard extends StatelessWidget {
-  final Assignment assignment;
+class _StatCard extends StatefulWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final bool isLoading;
+  final bool pulse;
+
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.isLoading = false,
+    this.pulse = false,
+  });
+
+  @override
+  State<_StatCard> createState() => _StatCardState();
+}
+
+class _StatCardState extends State<_StatCard> with SingleTickerProviderStateMixin {
+  late AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    if (widget.pulse) _pulseController.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_StatCard old) {
+    super.didUpdateWidget(old);
+    if (widget.pulse && !_pulseController.isAnimating) {
+      _pulseController.repeat(reverse: true);
+    } else if (!widget.pulse && _pulseController.isAnimating) {
+      _pulseController.stop();
+      _pulseController.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder2(
+      animation: _pulseController,
+      builder: (_, __) {
+        final opacity = widget.pulse ? 0.08 + (_pulseController.value * 0.08) : 0.08;
+        return Container(
+          decoration: BoxDecoration(
+            color: widget.color.withOpacity(opacity),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: widget.color.withOpacity(0.2)),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(widget.icon, color: widget.color, size: 22),
+                  if (widget.pulse)
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: widget.color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                ],
+              ),
+              const Spacer(),
+              widget.isLoading
+                  ? SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: widget.color,
+                      ),
+                    )
+                  : Text(
+                      widget.value,
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: widget.color,
+                      ),
+                    ),
+              const SizedBox(height: 2),
+              Text(
+                widget.title,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: widget.color.withOpacity(0.8),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Quick Action Button ─────────────────────────────────────
+
+class _QuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
   final VoidCallback onTap;
 
-  const _AssignmentCard({
-    required this.assignment,
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final incident = assignment.incident;
-    final statusColor =
-        AppColors.assignmentStatusColor(assignment.status ?? 'pending');
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        child: Container(
+          width: 82,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.15)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Recent Incident Card ────────────────────────────────────
+
+class _RecentIncidentCard extends StatelessWidget {
+  final Map<String, dynamic> incident;
+  final VoidCallback onTap;
+
+  const _RecentIncidentCard({required this.incident, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
+    final status = (incident['status'] ?? 'unknown') as String;
+    final severity = (incident['severity'] ?? '') as String;
+    final incNumber = incident['incident_number'] as String? ?? '#${incident['id']}';
+    final description = (incident['description'] ?? '') as String;
+    final reportedAt = incident['reported_at'] as String? ?? incident['created_at'] as String?;
+
+    final sevColor = AppColors.incidentSeverityColor(severity);
+
+    String timeStr = '';
+    if (reportedAt != null) {
+      try {
+        timeStr = timeago.format(DateTime.parse(reportedAt));
+      } catch (_) {
+        timeStr = reportedAt;
+      }
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: IntrinsicHeight(
           child: Row(
             children: [
-              // ── Type Icon ────────────────────────────────
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  _incidentIcon(incident?.type),
-                  color: statusColor,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // ── Info ─────────────────────────────────────
+              // Severity color bar
+              Container(width: 5, color: sevColor),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      incident?.title ?? incident?.type ?? 'Incident #${assignment.incidentId}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    if (incident?.address != null)
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Row(
                         children: [
-                          const Icon(Icons.location_on_outlined,
-                              size: 14, color: AppColors.textSecondary),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              incident!.address!,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                          Icon(_typeIcon(type), size: 16, color: sevColor),
+                          const SizedBox(width: 6),
+                          Text(
+                            incNumber,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: 'monospace',
                             ),
                           ),
+                          const Spacer(),
+                          if (timeStr.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                timeStr,
+                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                              ),
+                            ),
                         ],
                       ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        // Severity badge
-                        if (incident?.severity != null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.severityColor(incident!.severity!)
-                                  .withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              incident.severity!.toUpperCase(),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color:
-                                    AppColors.severityColor(incident.severity!),
-                              ),
-                            ),
-                          ),
-                        const Spacer(),
-                        // Time
-                        if (assignment.dispatchedAt != null)
-                          Text(
-                            _formatTime(assignment.dispatchedAt!),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.textHint,
-                            ),
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        type.replaceAll('_', ' ').toUpperCase(),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          description,
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // ── Status Badge ─────────────────────────────
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  assignment.statusLabel,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: statusColor,
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          _statusChip(status),
+                          const SizedBox(width: 6),
+                          _severityBadge(severity, sevColor),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: Icon(Icons.chevron_right, size: 20, color: AppColors.textHint),
               ),
             ],
           ),
@@ -244,35 +573,72 @@ class _AssignmentCard extends StatelessWidget {
     );
   }
 
-  IconData _incidentIcon(String? type) {
-    switch (type?.toLowerCase()) {
+  Widget _statusChip(String status) {
+    final color = AppColors.incidentStatusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        status.replaceAll('_', ' ').toUpperCase(),
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color),
+      ),
+    );
+  }
+
+  Widget _severityBadge(String severity, Color color) {
+    if (severity.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        severity.toUpperCase(),
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color),
+      ),
+    );
+  }
+
+  IconData _typeIcon(String type) {
+    switch (type.toLowerCase()) {
       case 'fire':
         return Icons.local_fire_department;
+      case 'medical_emergency':
       case 'medical':
         return Icons.local_hospital;
+      case 'vehicular_accident':
       case 'accident':
-      case 'vehicular':
         return Icons.car_crash;
       case 'flood':
-      case 'natural_disaster':
         return Icons.flood;
+      case 'natural_disaster':
+      case 'earthquake':
+      case 'landslide':
+      case 'typhoon':
+        return Icons.public;
       case 'rescue':
         return Icons.health_and_safety;
+      case 'crime':
+        return Icons.gavel;
       default:
         return Icons.warning_amber;
     }
   }
+}
 
-  String _formatTime(String dateStr) {
-    try {
-      final dt = DateTime.parse(dateStr);
-      final now = DateTime.now();
-      final diff = now.difference(dt);
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      return '${dt.month}/${dt.day} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {
-      return dateStr;
-    }
+/// Animated widget helper — wraps AnimatedWidget to rebuild on animation ticks.
+class AnimatedBuilder2 extends AnimatedWidget {
+  final Widget Function(BuildContext, Widget?) builder;
+
+  const AnimatedBuilder2({super.key, required Animation<double> animation, required this.builder})
+      : super(listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    return builder(context, null);
   }
 }

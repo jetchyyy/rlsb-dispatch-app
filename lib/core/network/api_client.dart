@@ -1,24 +1,54 @@
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
-import 'dio_interceptor.dart';
 
 class ApiClient {
   late final Dio _dio;
+  final SharedPreferences prefs;
 
-  ApiClient(DioInterceptor dioInterceptor) {
+  ApiClient(this.prefs) {
     _dio = Dio(
       BaseOptions(
         baseUrl: ApiConstants.baseUrl,
-        connectTimeout: const Duration(milliseconds: ApiConstants.connectTimeout),
-        receiveTimeout: const Duration(milliseconds: ApiConstants.receiveTimeout),
+        connectTimeout:
+            const Duration(milliseconds: ApiConstants.connectTimeout),
+        receiveTimeout:
+            const Duration(milliseconds: ApiConstants.receiveTimeout),
         sendTimeout: const Duration(milliseconds: ApiConstants.sendTimeout),
         headers: {
+          ApiConstants.accept: ApiConstants.applicationJson,
           ApiConstants.contentType: ApiConstants.applicationJson,
         },
       ),
     );
 
-    _dio.interceptors.add(dioInterceptor);
+    // ── Bearer token interceptor ──────────────────────────────
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final token = prefs.getString(ApiConstants.tokenKey);
+          if (token != null && token.isNotEmpty) {
+            options.headers[ApiConstants.authorization] =
+                '${ApiConstants.bearer} $token';
+          }
+          return handler.next(options);
+        },
+        onError: (error, handler) {
+          if (error.response?.statusCode == 401) {
+            prefs.remove(ApiConstants.tokenKey);
+            prefs.remove(ApiConstants.userKey);
+          }
+          return handler.next(error);
+        },
+      ),
+    );
+
+    // ── Debug logging ─────────────────────────────────────────
+    _dio.interceptors.add(LogInterceptor(
+      requestBody: true,
+      responseBody: true,
+      error: true,
+    ));
   }
 
   // GET request
@@ -26,17 +56,9 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? queryParameters,
     Options? options,
-  }) async {
-    try {
-      final response = await _dio.get(
-        path,
-        queryParameters: queryParameters,
-        options: options,
-      );
-      return response;
-    } on DioException {
-      rethrow;
-    }
+  }) {
+    return _dio.get(path,
+        queryParameters: queryParameters, options: options);
   }
 
   // POST request
@@ -45,18 +67,9 @@ class ApiClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
     Options? options,
-  }) async {
-    try {
-      final response = await _dio.post(
-        path,
-        data: data,
-        queryParameters: queryParameters,
-        options: options,
-      );
-      return response;
-    } on DioException {
-      rethrow;
-    }
+  }) {
+    return _dio.post(path,
+        data: data, queryParameters: queryParameters, options: options);
   }
 
   // PUT request
@@ -65,18 +78,9 @@ class ApiClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
     Options? options,
-  }) async {
-    try {
-      final response = await _dio.put(
-        path,
-        data: data,
-        queryParameters: queryParameters,
-        options: options,
-      );
-      return response;
-    } on DioException {
-      rethrow;
-    }
+  }) {
+    return _dio.put(path,
+        data: data, queryParameters: queryParameters, options: options);
   }
 
   // DELETE request
@@ -85,17 +89,8 @@ class ApiClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
     Options? options,
-  }) async {
-    try {
-      final response = await _dio.delete(
-        path,
-        data: data,
-        queryParameters: queryParameters,
-        options: options,
-      );
-      return response;
-    } on DioException {
-      rethrow;
-    }
+  }) {
+    return _dio.delete(path,
+        data: data, queryParameters: queryParameters, options: options);
   }
 }

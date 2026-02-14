@@ -1,33 +1,51 @@
 class ApiConstants {
   ApiConstants._();
 
-  // Base URL
-  static const String baseUrl = 'https://your-laravel-api.com';
+  // Base URL — points to the Laravel API
+  static const String baseUrl = 'https://pdrrmosdn-sandbox.inno.ph/api';
 
-  // Auth Endpoints
-  static const String login = '/api/responder/login';
-  static const String logout = '/api/responder/logout';
-  static const String profile = '/api/responder/profile';
+  // Auth Endpoints (authenticates against the 'users' table)
+  static const String loginEndpoint = '/login';
+  static const String logoutEndpoint = '/logout';
+  static const String profileEndpoint = '/web/user';
 
-  // Location
-  static const String updateLocation = '/api/responder/location';
+  // Incident Endpoints
+  static const String incidentsEndpoint = '/incidents';
+  static String incidentDetail(int id) => '/incidents/$id';
+  
+  // Incident Action Endpoints
+  static String incidentAcknowledge(int id) => '/incidents/$id/acknowledge';
+  static String incidentRespond(int id) => '/incidents/$id/respond';
+  static String incidentOnScene(int id) => '/incidents/$id/on-scene';
+  static String incidentResolve(int id) => '/incidents/$id/resolve';
+  static String incidentClose(int id) => '/incidents/$id/close';
+  static String incidentCancel(int id) => '/incidents/$id/cancel';
 
-  // Assignments
-  static const String assignments = '/api/responder/assignments';
-  static String acceptAssignment(int id) =>
-      '/api/responder/assignments/$id/accept';
-  static String rejectAssignment(int id) =>
-      '/api/responder/assignments/$id/reject';
-  static String updateAssignmentStatus(int id) =>
-      '/api/responder/assignments/$id/status';
+  // Emergency Incident Endpoints
+  static const String emergencyIncidents = '/emergency-incidents';
+  static const String emergencyIncidentStats = '/emergency-incidents/statistics';
+  static const String emergencyCitizenMapping = '/emergency-incidents/citizen-mapping-data';
+  static String emergencyIncidentDetail(int id) => '/emergency-incidents/$id';
+  static String emergencyLocationUpdates(int id) => '/emergency-incidents/$id/location-updates';
+  static String emergencyUpdateStatus(int id) => '/emergency-incidents/$id/update-status';
+  static String emergencyAssign(int id) => '/emergency-incidents/$id/assign';
 
-  // Incidents
-  static String incidentDetail(int id) => '/api/responder/incidents/$id';
-  static String injuryReport(int id) =>
-      '/api/responder/incidents/$id/injury-report';
+  // Staff Chat Endpoints
+  static String staffChatSend(int id) => '/staff/incidents/$id/chat/send';
+  static String staffChatMessages(int id) => '/staff/incidents/$id/chat/messages';
+  static String staffChatPoll(int id) => '/staff/incidents/$id/chat/poll';
+  static const String staffChatPollAll = '/staff/chat/poll-all';
+
+  // Location Endpoints
+  static const String locationUpdate = '/location/update';
+  static const String locationBatchUpdate = '/location/batch-update';
+  static const String locationHistory = '/location/history';
+  static const String locationSharingStatus = '/location/sharing-status';
+  static const String locationToggleSharing = '/location/toggle-sharing';
 
   // Headers
   static const String contentType = 'Content-Type';
+  static const String accept = 'Accept';
   static const String applicationJson = 'application/json';
   static const String authorization = 'Authorization';
   static const String bearer = 'Bearer';

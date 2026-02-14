@@ -4,10 +4,14 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
-import 'core/providers/auth_provider.dart';
+import 'core/constants/api_constants.dart';
+import 'core/network/api_client.dart';
 import 'core/providers/incident_provider.dart';
-import 'core/providers/injury_provider.dart';
-import 'core/services/notification_service.dart';
+import 'features/auth/data/datasources/auth_remote_datasource.dart';
+import 'features/auth/data/repositories/auth_repository_impl.dart';
+import 'features/auth/domain/usecases/login_user.dart';
+import 'features/auth/domain/usecases/logout_user.dart';
+import 'features/auth/presentation/providers/auth_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,18 +20,30 @@ void main() async {
   await Hive.initFlutter();
 
   // Ensure SharedPreferences is ready
-  await SharedPreferences.getInstance();
+  final prefs = await SharedPreferences.getInstance();
 
-  // Initialize OneSignal (app ID placeholder inside service)
-  final notificationService = NotificationService();
-  await notificationService.initialize();
+  // ── Build dependency graph ─────────────────────────────────
+  final apiClient = ApiClient(prefs);
+  final authRemoteDataSource = AuthRemoteDataSourceImpl(apiClient);
+  final authRepository = AuthRepositoryImpl(
+    remoteDataSource: authRemoteDataSource,
+    prefs: prefs,
+  );
+  final loginUser = LoginUser(authRepository);
+  final logoutUser = LogoutUser(authRepository);
 
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => IncidentProvider()),
-        ChangeNotifierProvider(create: (_) => InjuryProvider()),
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider(
+            loginUser: loginUser,
+            logoutUser: logoutUser,
+          ),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => IncidentProvider(apiClient),
+        ),
       ],
       child: const App(),
     ),

@@ -1,5 +1,8 @@
+// lib/data/datasources/auth_remote_datasource.dart
+import 'package:dio/dio.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/constants/api_constants.dart';
 import '../models/user_model.dart';
 
 abstract class AuthRemoteDataSource {
@@ -22,33 +25,6 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String password,
   }) async {
     try {
-      // MOCK IMPLEMENTATION - Replace with real API call later
-      // Simulate network delay
-      await Future.delayed(const Duration(seconds: 1));
-
-      // Mock validation
-      if (email == 'admin@test.com' && password == '123456') {
-        return UserModel(
-          id: 1,
-          name: 'Super Admin',
-          email: email,
-          role: 'superadmin',
-          token: 'mock_token_superadmin_${DateTime.now().millisecondsSinceEpoch}',
-        );
-      } else if (email == 'staff@test.com' && password == '123456') {
-        return UserModel(
-          id: 2,
-          name: 'Staff User',
-          email: email,
-          role: 'staff',
-          token: 'mock_token_staff_${DateTime.now().millisecondsSinceEpoch}',
-        );
-      } else {
-        throw AuthException(message: 'Invalid email or password');
-      }
-
-      // Real API implementation (commented out for now)
-      /*
       final response = await apiClient.post(
         ApiConstants.loginEndpoint,
         data: {
@@ -57,19 +33,54 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         },
       );
 
-      if (response.statusCode == 200) {
-        return UserModel.fromJson(response.data['data']);
+      // Laravel returns: { success, message, data: { user, token, token_type } }
+      if (response.data['success'] == true) {
+        var userModel = UserModel.fromLoginJson(response.data);
+
+        // Fetch full profile (roles, division, position, etc.)
+        try {
+          final profileResponse = await apiClient.get(
+            ApiConstants.profileEndpoint,
+            options: Options(
+              headers: {
+                ApiConstants.authorization:
+                    '${ApiConstants.bearer} ${userModel.token}',
+              },
+            ),
+          );
+          if (profileResponse.data['success'] == true) {
+            userModel = userModel.copyWithProfile(profileResponse.data);
+          }
+        } catch (_) {
+          // Profile fetch is optional; login succeeds with minimal data
+        }
+
+        return userModel;
       } else {
-        throw ServerException(
+        throw AuthException(
           message: response.data['message'] ?? 'Login failed',
-          statusCode: response.statusCode,
         );
       }
-      */
-    } catch (e) {
-      if (e is AuthException) {
-        rethrow;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw AuthException(
+          message: e.response?.data['message'] ?? 'Invalid email or password',
+        );
+      } else if (e.response?.statusCode == 422) {
+        // Validation errors
+        final errors = e.response?.data['errors'] as Map<String, dynamic>?;
+        final firstError = errors?.values.first;
+        throw AuthException(
+          message: firstError is List ? firstError.first : 'Validation failed',
+        );
+      } else {
+        throw ServerException(
+          message: e.message ?? 'Network error occurred',
+          statusCode: e.response?.statusCode,
+        );
       }
+    } catch (e) {
+      if (e is AuthException || e is ServerException) rethrow;
       throw ServerException(message: e.toString());
     }
   }
@@ -77,14 +88,16 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<void> logout() async {
     try {
-      // MOCK IMPLEMENTATION - Replace with real API call later
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Real API implementation (commented out for now)
-      /*
       await apiClient.post(ApiConstants.logoutEndpoint);
-      */
+    } on DioException catch (e) {
+      if (e.response?.statusCode != 401) {
+        throw ServerException(
+          message: e.message ?? 'Logout failed',
+          statusCode: e.response?.statusCode,
+        );
+      }
     } catch (e) {
+      if (e is ServerException) rethrow;
       throw ServerException(message: e.toString());
     }
   }
