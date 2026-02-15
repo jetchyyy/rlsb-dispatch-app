@@ -286,17 +286,72 @@ class IncidentProvider extends ChangeNotifier {
 
     try {
       final stopwatch = Stopwatch()..start();
-      final response = await _api.get(endpoint);
+      
+      // Add query parameters to load relationships
+      // Try both 'include' (common in Laravel APIs with Spatie QueryBuilder)
+      // and 'with' (custom Laravel implementations)
+      final queryParams = {
+        'include': 'citizen,assigned_user',
+        'with': 'citizen,assigned_user',
+      };
+      
+      debugPrint('  📎 Query params: $queryParams');
+      
+      final response = await _api.get(endpoint, queryParameters: queryParams);
       stopwatch.stop();
 
       debugPrint('  ✅ Response in ${stopwatch.elapsedMilliseconds}ms');
 
       final data = response.data;
       if (data is Map<String, dynamic>) {
-        _currentIncident = data['data'] as Map<String, dynamic>? ?? data;
+        // The API likely returns {success: true, incident: {...}}
+        // Try 'incident' key first (singular), then 'data', then fall back to full response
+        _currentIncident = data['incident'] as Map<String, dynamic>? 
+            ?? data['data'] as Map<String, dynamic>? 
+            ?? data;
+        
+        // Debug: Log the raw response structure first
+        debugPrint('  📋 Response structure:');
+        debugPrint('    - Has "incident" key: ${data.containsKey('incident')}');
+        debugPrint('    - Has "data" key: ${data.containsKey('data')}');
+        debugPrint('    - Has "success" key: ${data.containsKey('success')} (${data['success']})');
+        debugPrint('    - Keys: ${data.keys.toList()}');
+        
+        // Debug: Log the FULL incident data to see what we're getting
+        debugPrint('  📋 Full incident data:');
+        final incidentJson = const JsonEncoder.withIndent('    ').convert(_currentIncident);
+        final lines = incidentJson.split('\n');
+        final maxLines = lines.length < 50 ? lines.length : 50;
+        for (var i = 0; i < maxLines; i++) {
+          debugPrint('    ${lines[i]}');
+        }
+        if (lines.length > 50) {
+          debugPrint('    ... [${lines.length - 50} more lines]');
+        }
+        
         debugPrint('  📋 Loaded: #${_currentIncident?['incident_number']} '
             'status=${_currentIncident?['status']} '
             'severity=${_currentIncident?['severity']}');
+        
+        // Debug log to check if relationships are loaded
+        final hasCitizen = _currentIncident?['citizen'] != null;
+        final hasAssignedUser = _currentIncident?['assigned_user'] != null;
+        final hasCitizenId = _currentIncident?['citizen_id'] != null;
+        final hasAssignedToId = _currentIncident?['assigned_to'] != null;
+        
+        debugPrint('  👤 Citizen object loaded: $hasCitizen');
+        debugPrint('  🆔 Citizen ID present: $hasCitizenId (value: ${_currentIncident?['citizen_id']})');
+        debugPrint('  🚨 Assigned User object loaded: $hasAssignedUser');
+        debugPrint('  🆔 Assigned To ID present: $hasAssignedToId (value: ${_currentIncident?['assigned_to']})');
+        
+        if (hasCitizen) {
+          final citizenName = _currentIncident?['citizen']?['name'];
+          debugPrint('     ✅ Citizen name: $citizenName');
+        }
+        if (hasAssignedUser) {
+          final assignedName = _currentIncident?['assigned_user']?['name'];
+          debugPrint('     ✅ Assigned to: $assignedName');
+        }
       }
     } on DioException catch (e) {
       _handleDioError(e);

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -5,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../injury_mapper/screens/injury_mapper_screen.dart';
 
 class IncidentDetailScreen extends StatefulWidget {
   final int incidentId;
@@ -18,6 +21,7 @@ class IncidentDetailScreen extends StatefulWidget {
 class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   final _notesController = TextEditingController();
   bool _showNotes = false;
+  bool _hasShownInjuryMapper = false; // Track if we've already opened the injury mapper
 
   // Status workflow: current status → next status
   static const _nextStatus = {
@@ -48,6 +52,26 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       context.read<IncidentProvider>().fetchIncident(widget.incidentId);
     });
   }
+  
+  void _checkAndOpenInjuryMapper(Map<String, dynamic>? incident) {
+    if (incident == null || _hasShownInjuryMapper) return;
+    
+    final status = incident['status'] as String?;
+    if (status == 'on_scene') {
+      _hasShownInjuryMapper = true;
+      
+      // Delay to ensure the detail screen is fully built
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => InjuryMapperScreen(incidentId: widget.incidentId),
+          ),
+        );
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -63,6 +87,11 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   Widget build(BuildContext context) {
     final ip = context.watch<IncidentProvider>();
     final incident = ip.currentIncident;
+
+    // Automatically open injury mapper if incident is on_scene
+    if (incident != null && !ip.isLoading) {
+      _checkAndOpenInjuryMapper(incident);
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -342,12 +371,26 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     if (success) {
       _notesController.clear();
       setState(() => _showNotes = false);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Status updated to ${nextStatus.replaceAll('_', ' ')}'),
           backgroundColor: AppColors.success,
         ),
       );
+      
+      // If status changed to "on_scene", automatically open injury mapper
+      if (nextStatus == 'on_scene') {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => InjuryMapperScreen(incidentId: incidentId),
+            ),
+          );
+        });
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -381,15 +424,59 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     final locationDesc = incident['location_description'] as String?;
 
     // Details
-    final title = incident['title'] as String? ?? type.replaceAll('_', ' ');
+    final title = (incident['incident_title'] ?? incident['title']) as String? ?? type.replaceAll('_', ' ');
     final description = incident['description'] as String? ?? '';
     final peopleAffected = incident['estimated_people_affected'];
-    final casualties = incident['casualties'] as List?;
-    final propertyDamage = incident['property_damage'] as List?;
+    
+    // Parse casualties - might be a JSON string or already a List
+    List? casualties;
+    if (incident['casualties'] != null) {
+      if (incident['casualties'] is String) {
+        try {
+          casualties = jsonDecode(incident['casualties'] as String) as List?;
+        } catch (e) {
+          debugPrint('⚠️ Failed to parse casualties JSON: $e');
+        }
+      } else if (incident['casualties'] is List) {
+        casualties = incident['casualties'] as List;
+      }
+    }
+    
+    // Parse property_damage - might be a JSON string or already a List
+    List? propertyDamage;
+    if (incident['property_damage'] != null) {
+      if (incident['property_damage'] is String) {
+        try {
+          propertyDamage = jsonDecode(incident['property_damage'] as String) as List?;
+        } catch (e) {
+          debugPrint('⚠️ Failed to parse property_damage JSON: $e');
+        }
+      } else if (incident['property_damage'] is List) {
+        propertyDamage = incident['property_damage'] as List;
+      }
+    }
 
     // Reporter
     final citizen = incident['citizen'] as Map<String, dynamic>?;
     final source = incident['source'] as String?;
+    
+    // Fallback: Parse reporter info from description if citizen object is null
+    String? reporterNameFromDesc;
+    String? reporterContactFromDesc;
+    if (citizen == null && description.isNotEmpty) {
+      // Try to extract "Reported by: NAME" and "Contact: PHONE"
+      final reportedByMatch = RegExp(r'Reported by:\s*([^\n]+)', caseSensitive: false)
+          .firstMatch(description);
+      final contactMatch = RegExp(r'Contact:\s*([^\n]+)', caseSensitive: false)
+          .firstMatch(description);
+      
+      if (reportedByMatch != null) {
+        reporterNameFromDesc = reportedByMatch.group(1)?.trim();
+      }
+      if (contactMatch != null) {
+        reporterContactFromDesc = contactMatch.group(1)?.trim();
+      }
+    }
 
     // Response
     final assignedUser = incident['assigned_user'] as Map<String, dynamic>?;
@@ -466,9 +553,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
             _InfoRow(
               icon: Icons.map_outlined,
               label: 'Area',
-              value: [barangay, municipality, province]
-                  .where((s) => s != null && s.isNotEmpty)
-                  .join(', '),
+              value: () {
+                final areaStr = [barangay, municipality, province]
+                    .where((s) => s != null && s.isNotEmpty)
+                    .join(', ');
+                return areaStr.isNotEmpty ? areaStr : 'Not specified';
+              }(),
             ),
             if (locationDesc != null && locationDesc.isNotEmpty)
               _InfoRow(icon: Icons.description, label: 'Description', value: locationDesc),
@@ -569,6 +659,55 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 ),
               if (citizen['email'] != null)
                 _InfoRow(icon: Icons.email, label: 'Email', value: citizen['email'] as String),
+            ] else if (reporterNameFromDesc != null || reporterContactFromDesc != null) ...[
+              // Fallback: Show parsed data from description
+              if (reporterNameFromDesc != null)
+                _InfoRow(
+                  icon: Icons.person,
+                  label: 'Name',
+                  value: reporterNameFromDesc,
+                ),
+              if (reporterContactFromDesc != null)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoRow(
+                        icon: Icons.phone,
+                        label: 'Phone',
+                        value: reporterContactFromDesc,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.call, color: AppColors.success, size: 20),
+                      onPressed: () => _callPhone(reporterContactFromDesc!),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Info extracted from incident description',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange.shade700,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ] else
               const _InfoRow(icon: Icons.person, label: 'Reporter', value: 'No reporter info'),
             if (source != null)
@@ -576,73 +715,66 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           ],
         ),
 
-        // ── Response Section ─────────────────────────────
-        _SectionCard(
-          icon: Icons.emergency,
-          title: 'Response',
-          children: [
-            _InfoRow(
-              icon: Icons.assignment_ind,
-              label: 'Assigned To',
-              value: assignedUser?['name'] as String? ?? 'Unassigned',
-            ),
-            if (internalNotes != null && internalNotes.isNotEmpty)
-              _ExpandableInfo(
-                title: 'Internal Notes',
-                icon: Icons.note,
-                children: [Text(internalNotes, style: const TextStyle(fontSize: 13))],
-              ),
-            if (resolutionDetails != null && resolutionDetails.isNotEmpty)
-              _ExpandableInfo(
-                title: 'Resolution Details',
-                icon: Icons.check_circle_outline,
-                children: [Text(resolutionDetails, style: const TextStyle(fontSize: 13))],
-              ),
-          ],
+        // ── Response Section ────────────────────────────── 
+        Builder(
+          builder: (context) {
+            // Parse status_history - might be a JSON string or already a List
+            List? statusHistory;
+            if (incident['status_history'] is String) {
+              try {
+                statusHistory = jsonDecode(incident['status_history'] as String) as List?;
+              } catch (e) {
+                debugPrint('⚠️ Failed to parse status_history JSON: $e');
+              }
+            } else if (incident['status_history'] is List) {
+              statusHistory = incident['status_history'] as List;
+            }
+            
+            if (statusHistory == null || statusHistory.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            
+            return _SectionCard(
+              icon: Icons.history,
+              title: 'Status History',
+              children: [
+                ...statusHistory.map<Widget>((entry) {
+                  final e = entry as Map<String, dynamic>;
+                  final eStatus = e['status'] as String? ?? '';
+                  final eTime = e['timestamp'] as String? ?? e['created_at'] as String? ?? '';
+                  String eTimeStr = eTime;
+                  try {
+                    eTimeStr = timeago.format(DateTime.parse(eTime));
+                  } catch (_) {}
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: AppColors.incidentStatusColor(eStatus),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            eStatus.replaceAll('_', ' ').toUpperCase(),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        Text(eTimeStr,
+                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
         ),
-
-        // ── Status History ───────────────────────────────
-        if (incident['status_history'] != null &&
-            (incident['status_history'] as List).isNotEmpty)
-          _SectionCard(
-            icon: Icons.history,
-            title: 'Status History',
-            children: [
-              ...(incident['status_history'] as List).map<Widget>((entry) {
-                final e = entry as Map<String, dynamic>;
-                final eStatus = e['status'] as String? ?? '';
-                final eTime = e['created_at'] as String? ?? '';
-                String eTimeStr = eTime;
-                try {
-                  eTimeStr = timeago.format(DateTime.parse(eTime));
-                } catch (_) {}
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: AppColors.incidentStatusColor(eStatus),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          eStatus.replaceAll('_', ' ').toUpperCase(),
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                      Text(eTimeStr,
-                          style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
-                    ],
-                  ),
-                );
-              }),
-            ],
-          ),
 
         // ── Location Updates Button ──────────────────────
         Padding(
@@ -659,7 +791,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
 
   void _showLocationHistory(BuildContext context) async {
     final ip = context.read<IncidentProvider>();
-    final updates = await ip.fetchLocationUpdates(widget.incidentId);
+    
+    // Get location updates from the current incident data (already loaded)
+    final incident = ip.currentIncident;
+    final updates = (incident?['location_updates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    
+    debugPrint('📍 Showing location history: ${updates.length} updates');
 
     if (!mounted) return;
 
@@ -676,32 +813,97 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         expand: false,
         builder: (_, scrollController) => Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Location Updates',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Location Update History',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text('${updates.length} points',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
+                ],
+              ),
             ),
             const Divider(height: 1),
             Expanded(
               child: updates.isEmpty
-                  ? const Center(child: Text('No location updates'))
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.location_off, size: 48, color: AppColors.textHint),
+                          SizedBox(height: 8),
+                          Text('No location updates yet',
+                              style: TextStyle(color: AppColors.textHint)),
+                          SizedBox(height: 4),
+                          Text('Responder location will appear here',
+                              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+                        ],
+                      ),
+                    )
                   : ListView.builder(
                       controller: scrollController,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: updates.length,
                       itemBuilder: (_, i) {
                         final u = updates[i];
                         String tStr = '';
+                        String timestamp = u['timestamp'] as String? ?? u['created_at'] as String? ?? '';
                         try {
-                          tStr = timeago.format(
-                              DateTime.parse(u['created_at'] as String));
-                        } catch (_) {}
+                          tStr = timeago.format(DateTime.parse(timestamp));
+                        } catch (_) {
+                          tStr = timestamp;
+                        }
+                        
+                        final lat = u['latitude'];
+                        final lng = u['longitude'];
+                        final accuracy = u['accuracy'];
+                        final speed = u['speed'];
+                        final heading = u['heading'];
+                        
                         return ListTile(
-                          leading: const Icon(Icons.location_on, size: 20),
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.primary.withOpacity(0.1),
+                            radius: 20,
+                            child: const Icon(Icons.location_on, size: 20, color: AppColors.primary),
+                          ),
                           title: Text(
-                            '${u['latitude']}, ${u['longitude']}',
+                            '$lat, $lng',
                             style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
                           ),
-                          subtitle: Text(tStr),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(tStr, style: const TextStyle(fontSize: 12)),
+                              if (accuracy != null || speed != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Row(
+                                    children: [
+                                      if (accuracy != null)
+                                        Text('±${accuracy}m', 
+                                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                      if (accuracy != null && speed != null)
+                                        const Text(' • ', 
+                                            style: TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                      if (speed != null)
+                                        Text('${speed}m/s', 
+                                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.map, size: 20),
+                            onPressed: () {
+                              // Open in maps
+                              launchUrl(Uri.parse(
+                                  'https://www.google.com/maps/search/?api=1&query=$lat,$lng'));
+                            },
+                          ),
+                          isThreeLine: accuracy != null || speed != null,
                         );
                       },
                     ),

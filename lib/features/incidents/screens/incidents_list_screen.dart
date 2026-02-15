@@ -411,7 +411,7 @@ class _IncidentListCard extends StatelessWidget {
     final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
     final status = (incident['status'] ?? 'unknown') as String;
     final severity = (incident['severity'] ?? '') as String;
-    final title = (incident['title'] ?? type.replaceAll('_', ' ')) as String;
+    final title = (incident['incident_title'] ?? incident['title'] ?? type.replaceAll('_', ' ')) as String;
     final description = (incident['description'] ?? '') as String;
     final incNumber = incident['incident_number'] as String? ?? '#${incident['id']}';
     final municipality = incident['municipality'] as String?;

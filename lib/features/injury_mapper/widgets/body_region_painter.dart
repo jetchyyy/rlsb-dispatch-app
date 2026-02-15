@@ -67,6 +67,13 @@ class BodyRegionPainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5;
         canvas.drawPath(path, borderPaint);
+      } else {
+        // Draw subtle border for all regions so they're visible
+        final borderPaint = Paint()
+          ..color = Colors.grey.withOpacity(0.3)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+        canvas.drawPath(path, borderPaint);
       }
     }
   }

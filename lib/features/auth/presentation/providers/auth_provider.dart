@@ -72,4 +72,31 @@ class AuthProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
   }
+
+  // Check if user is already logged in (on app startup)
+  Future<void> checkAuthStatus() async {
+    _state = AuthState.loading;
+    notifyListeners();
+
+    final result = await loginUser.repository.getCurrentUser();
+
+    result.fold(
+      (failure) {
+        _state = AuthState.unauthenticated;
+        _user = null;
+        notifyListeners();
+      },
+      (user) {
+        if (user != null) {
+          _state = AuthState.authenticated;
+          _user = user;
+          _errorMessage = null;
+        } else {
+          _state = AuthState.unauthenticated;
+          _user = null;
+        }
+        notifyListeners();
+      },
+    );
+  }
 }

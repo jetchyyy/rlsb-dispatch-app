@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -14,24 +15,40 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _fadeController;
+  late final Animation<double> _fadeAnimation;
+
   @override
   void initState() {
     super.initState();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOut,
+    );
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       if (auth.isAuthenticated) {
         final provider = context.read<IncidentProvider>();
+        // Clear any existing filters to show all incidents
+        provider.clearFilters();
         provider.fetchIncidents();
         provider.fetchStatistics();
         provider.startAutoRefresh();
       }
+      _fadeController.forward();
     });
   }
 
   @override
   void dispose() {
-    // Auto-refresh is stopped by provider.dispose or stopAutoRefresh
+    _fadeController.dispose();
     super.dispose();
   }
 
@@ -40,269 +57,566 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final authProvider = context.watch<AuthProvider>();
     final ip = context.watch<IncidentProvider>();
     final user = authProvider.user;
+    final bottomPad = MediaQuery.of(context).padding.bottom;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('PDRRMO Dispatch'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: () {
-              ip.fetchIncidents();
-              ip.fetchStatistics();
-            },
-          ),
-          IconButton(
-            icon: const CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.white24,
-              child: Icon(Icons.person, size: 20, color: Colors.white),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF1F5F9),
+        body: RefreshIndicator(
+          onRefresh: () async {
+            HapticFeedback.mediumImpact();
+            await Future.wait([
+              ip.fetchIncidents(),
+              ip.fetchStatistics(),
+            ]);
+          },
+          color: Colors.white,
+          backgroundColor: AppColors.primary,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              slivers: [
+                // ── Header ─────────────────────────────────
+                _buildHeader(user, ip),
+
+                // ── Content ────────────────────────────────
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 96 + bottomPad),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 20),
+
+                        // Stats row
+                        _buildStatsRow(ip),
+
+                        const SizedBox(height: 28),
+
+                        // Quick actions
+                        _buildQuickActions(context),
+
+                        // Error banner
+                        if (ip.errorMessage != null) ...[
+                          const SizedBox(height: 20),
+                          _buildErrorBanner(ip),
+                        ],
+
+                        const SizedBox(height: 28),
+
+                        // Recent incidents
+                        _buildRecentIncidents(context, ip),
+
+                        // Last updated
+                        if (ip.lastFetchTime != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 20),
+                            child: Center(
+                              child: Text(
+                                'Updated ${timeago.format(ip.lastFetchTime!)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade400,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            onPressed: () => context.push('/profile'),
           ),
-        ],
+        ),
+        floatingActionButton: _buildFAB(context),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/incidents/create'),
-        icon: const Icon(Icons.add),
-        label: const Text('New Incident'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          await Future.wait([
-            ip.fetchIncidents(),
-            ip.fetchStatistics(),
-          ]);
-        },
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: 100),
-          children: [
-            // ── Welcome Header ───────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // HEADER
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildHeader(dynamic user, IncidentProvider ip) {
+    return SliverAppBar(
+      expandedHeight: 150,
+      floating: false,
+      pinned: true,
+      stretch: true,
+      backgroundColor: AppColors.primary,
+      surfaceTintColor: Colors.transparent,
+      flexibleSpace: FlexibleSpaceBar(
+        background: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF0D47A1),
+                Color(0xFF1565C0),
+                Color(0xFF1976D2),
+              ],
+            ),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 52, 20, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    'Welcome, ${user?.name ?? 'Staff'}!',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    'Welcome back,',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withOpacity(0.7),
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    user?.position != null
-                        ? '${user!.position} • ${user.division ?? ""}'
-                        : user?.roleLabel ?? 'Staff',
-                    style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+                    user?.name ?? 'Staff',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: -0.3,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
+                  const SizedBox(height: 4),
+                  if (user != null)
+                    Text(
+                      user.position != null
+                          ? '${user.position}${user.division != null ? " · ${user.division}" : ""}'
+                          : user.roleLabel,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.6),
+                        fontWeight: FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ),
             ),
-
-            // ── Stat Cards (2x2 Grid) ────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.7,
-                children: [
-                  _StatCard(
-                    title: 'Active',
-                    value: ip.activeCount.toString(),
-                    icon: Icons.radio_button_checked,
-                    color: AppColors.severityCritical,
-                    isLoading: ip.isLoading,
-                  ),
-                  _StatCard(
-                    title: 'New',
-                    value: ip.newCount.toString(),
-                    icon: Icons.fiber_new,
-                    color: const Color(0xFFEA580C),
-                    isLoading: ip.isLoading,
-                    pulse: ip.newCount > 0,
-                  ),
-                  _StatCard(
-                    title: 'Critical',
-                    value: ip.criticalCount.toString(),
-                    icon: Icons.warning_amber_rounded,
-                    color: const Color(0xFFB91C1C),
-                    isLoading: ip.isLoading,
-                  ),
-                  _StatCard(
-                    title: "Today's Total",
-                    value: ip.todayTotal.toString(),
-                    icon: Icons.info_outline,
-                    color: AppColors.info,
-                    isLoading: ip.isLoading,
-                  ),
-                ],
-              ),
-            ),
-
-            // ── Quick Actions ────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-              child: Text(
-                'Quick Actions',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700,
+          ),
+        ),
+        collapseMode: CollapseMode.pin,
+      ),
+      title: const Text(
+        'PDRRMO Dispatch',
+        style: TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+          letterSpacing: -0.2,
+        ),
+      ),
+      actions: [
+        IconButton(
+          icon: Icon(
+            Icons.refresh_rounded,
+            color: Colors.white.withOpacity(0.85),
+            size: 22,
+          ),
+          tooltip: 'Refresh',
+          onPressed: () {
+            HapticFeedback.lightImpact();
+            ip.fetchIncidents();
+            ip.fetchStatistics();
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: GestureDetector(
+            onTap: () => context.push('/profile'),
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.25),
+                  width: 1.5,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 88,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  _QuickAction(
-                    icon: Icons.list_alt,
-                    label: 'All Incidents',
-                    color: AppColors.primary,
-                    onTap: () => context.push('/incidents'),
-                  ),
-                  _QuickAction(
-                    icon: Icons.map_outlined,
-                    label: 'Live Map',
-                    color: const Color(0xFF06B6D4),
-                    onTap: () => context.push('/map'),
-                  ),
-                  _QuickAction(
-                    icon: Icons.analytics_outlined,
-                    label: 'Analytics',
-                    color: const Color(0xFF8B5CF6),
-                    onTap: () => context.push('/analytics'),
-                  ),
-                  _QuickAction(
-                    icon: Icons.add_circle_outline,
-                    label: 'Report',
-                    color: AppColors.severityCritical,
-                    onTap: () => context.push('/incidents/create'),
-                  ),
-                ],
+              child: Icon(
+                Icons.person_outline_rounded,
+                size: 18,
+                color: Colors.white.withOpacity(0.9),
               ),
             ),
+          ),
+        ),
+      ],
+    );
+  }
 
-            // ── Error Banner ─────────────────────────────
-            if (ip.errorMessage != null) ...[
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.error.withOpacity(0.3)),
+  // ═══════════════════════════════════════════════════════════
+  // STATS ROW
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildStatsRow(IncidentProvider ip) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: _StatTile(
+              label: 'Active',
+              value: ip.activeCount,
+              icon: Icons.radio_button_checked_rounded,
+              color: const Color(0xFFEF4444),
+              isLoading: ip.isLoading,
+              pulse: ip.activeCount > 0,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _StatTile(
+              label: 'New',
+              value: ip.newCount,
+              icon: Icons.fiber_new_rounded,
+              color: const Color(0xFFF97316),
+              isLoading: ip.isLoading,
+              pulse: ip.newCount > 0,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _StatTile(
+              label: 'Critical',
+              value: ip.criticalCount,
+              icon: Icons.warning_amber_rounded,
+              color: const Color(0xFFDC2626),
+              isLoading: ip.isLoading,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _StatTile(
+              label: 'Total',
+              value: ip.todayTotal,
+              icon: Icons.assessment_outlined,
+              color: const Color(0xFF3B82F6),
+              isLoading: ip.isLoading,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // QUICK ACTIONS
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildQuickActions(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'QUICK ACTIONS',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: Colors.grey.shade500,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _ActionCard(
+                  icon: Icons.list_alt_rounded,
+                  label: 'Incidents',
+                  subtitle: 'View all',
+                  color: AppColors.primary,
+                  onTap: () => context.push('/incidents'),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.error_outline, color: AppColors.error, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(ip.errorMessage!,
-                          style: const TextStyle(color: AppColors.error, fontSize: 13)),
-                    ),
-                    TextButton(
-                      onPressed: () => ip.fetchIncidents(),
-                      child: const Text('Retry'),
-                    ),
-                  ],
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ActionCard(
+                  icon: Icons.map_outlined,
+                  label: 'Live Map',
+                  subtitle: 'Track',
+                  color: const Color(0xFF06B6D4),
+                  onTap: () => context.push('/map'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ActionCard(
+                  icon: Icons.analytics_outlined,
+                  label: 'Analytics',
+                  subtitle: 'Reports',
+                  color: const Color(0xFF8B5CF6),
+                  onTap: () => context.push('/analytics'),
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
 
-            // ── Recent Incidents Timeline ─────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Recent Incidents',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                  if (ip.incidents.isNotEmpty)
-                    TextButton(
-                      onPressed: () => context.push('/incidents'),
-                      child: const Text('View All'),
-                    ),
-                ],
+  // ═══════════════════════════════════════════════════════════
+  // ERROR BANNER
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildErrorBanner(IncidentProvider ip) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFFECACA)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline_rounded,
+                color: Color(0xFFDC2626), size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                ip.errorMessage!,
+                style: const TextStyle(
+                  color: Color(0xFFDC2626),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-
-            if (ip.isLoading && ip.incidents.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (ip.incidents.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(32),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Icon(Icons.assignment_outlined, size: 56, color: Colors.grey.shade300),
-                      const SizedBox(height: 12),
-                      const Text('No incidents found', style: TextStyle(color: AppColors.textSecondary)),
-                      const SizedBox(height: 4),
-                      const Text('Pull down to refresh', style: TextStyle(fontSize: 12, color: AppColors.textHint)),
-                    ],
-                  ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => ip.fetchIncidents(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDC2626).withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-              )
-            else
-              ...ip.incidents.take(5).map((incident) {
-                return _RecentIncidentCard(
-                  incident: incident,
-                  onTap: () {
-                    final id = incident['id'];
-                    if (id != null) context.push('/incidents/$id');
-                  },
-                );
-              }),
-
-            // ── Last updated ─────────────────────────────
-            if (ip.lastFetchTime != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Center(
-                  child: Text(
-                    'Last updated ${timeago.format(ip.lastFetchTime!)}',
-                    style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(
+                    color: Color(0xFFDC2626),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
+            ),
           ],
         ),
       ),
     );
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // RECENT INCIDENTS
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildRecentIncidents(BuildContext context, IncidentProvider ip) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'RECENT INCIDENTS',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: Colors.grey.shade500,
+                ),
+              ),
+              if (ip.incidents.isNotEmpty)
+                GestureDetector(
+                  onTap: () => context.push('/incidents'),
+                  child: const Text(
+                    'View all',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Content
+          if (ip.isLoading && ip.incidents.isEmpty)
+            _buildLoadingShimmer()
+          else if (ip.incidents.isEmpty)
+            _buildEmptyState()
+          else
+            _buildIncidentList(ip),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingShimmer() {
+    return Column(
+      children: List.generate(
+        3,
+        (i) => Padding(
+          padding: EdgeInsets.only(bottom: i < 2 ? 8 : 0),
+          child: Container(
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.check_circle_outline_rounded,
+              size: 48, color: Colors.grey.shade300),
+          const SizedBox(height: 12),
+          Text(
+            'No incidents',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Pull down to refresh',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIncidentList(IncidentProvider ip) {
+    final incidents = ip.incidents.take(5).toList();
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (int i = 0; i < incidents.length; i++) ...[
+            _IncidentRow(
+              incident: incidents[i],
+              onTap: () {
+                final id = incidents[i]['id'];
+                if (id != null) context.push('/incidents/$id');
+              },
+            ),
+            if (i < incidents.length - 1)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: Colors.grey.shade100,
+                indent: 54,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // FAB
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildFAB(BuildContext context) {
+    return FloatingActionButton.extended(
+      onPressed: () {
+        HapticFeedback.mediumImpact();
+        context.push('/incidents/create');
+      },
+      icon: const Icon(Icons.add_rounded, size: 20),
+      label: const Text(
+        'Report',
+        style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.3),
+      ),
+      backgroundColor: AppColors.primary,
+      foregroundColor: Colors.white,
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    );
+  }
 }
 
-// ─── Stat Card ───────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// STAT TILE
+// ═════════════════════════════════════════════════════════════
 
-class _StatCard extends StatefulWidget {
-  final String title;
-  final String value;
+class _StatTile extends StatefulWidget {
+  final String label;
+  final int value;
   final IconData icon;
   final Color color;
   final bool isLoading;
   final bool pulse;
 
-  const _StatCard({
-    required this.title,
+  const _StatTile({
+    required this.label,
     required this.value,
     required this.icon,
     required this.color,
@@ -311,98 +625,122 @@ class _StatCard extends StatefulWidget {
   });
 
   @override
-  State<_StatCard> createState() => _StatCardState();
+  State<_StatTile> createState() => _StatTileState();
 }
 
-class _StatCardState extends State<_StatCard> with SingleTickerProviderStateMixin {
-  late AnimationController _pulseController;
+class _StatTileState extends State<_StatTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _pulse;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
+    _pulse = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1400),
     );
-    if (widget.pulse) _pulseController.repeat(reverse: true);
+    if (widget.pulse) _pulse.repeat(reverse: true);
   }
 
   @override
-  void didUpdateWidget(_StatCard old) {
+  void didUpdateWidget(_StatTile old) {
     super.didUpdateWidget(old);
-    if (widget.pulse && !_pulseController.isAnimating) {
-      _pulseController.repeat(reverse: true);
-    } else if (!widget.pulse && _pulseController.isAnimating) {
-      _pulseController.stop();
-      _pulseController.value = 0;
+    if (widget.pulse && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!widget.pulse && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
     }
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _pulse.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder2(
-      animation: _pulseController,
-      builder: (_, __) {
-        final opacity = widget.pulse ? 0.08 + (_pulseController.value * 0.08) : 0.08;
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, child) {
+        final glow = widget.pulse ? _pulse.value * 0.08 : 0.0;
         return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
           decoration: BoxDecoration(
-            color: widget.color.withOpacity(opacity),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: widget.color.withOpacity(0.2)),
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Icon(widget.icon, color: widget.color, size: 22),
-                  if (widget.pulse)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: widget.color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                ],
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: widget.pulse
+                    ? widget.color.withOpacity(0.08 + glow)
+                    : Colors.black.withOpacity(0.03),
+                blurRadius: widget.pulse ? 12 : 8,
+                offset: const Offset(0, 2),
               ),
-              const Spacer(),
+            ],
+          ),
+          child: Column(
+            children: [
+              // Icon
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: widget.color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(widget.icon, color: widget.color, size: 16),
+              ),
+              const SizedBox(height: 8),
+
+              // Value
               widget.isLoading
                   ? SizedBox(
-                      height: 16,
-                      width: 16,
+                      height: 14,
+                      width: 14,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                        strokeWidth: 1.5,
                         color: widget.color,
                       ),
                     )
                   : Text(
-                      widget.value,
+                      '${widget.value}',
                       style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
                         color: widget.color,
+                        height: 1,
                       ),
                     ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
+
+              // Label
               Text(
-                widget.title,
+                widget.label,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: widget.color.withOpacity(0.8),
-                  fontWeight: FontWeight.w500,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade500,
+                  letterSpacing: 0.3,
                 ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
+
+              // Pulse dot
+              if (widget.pulse) ...[
+                const SizedBox(height: 4),
+                Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: widget.color.withOpacity(0.5 + glow * 4),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
             ],
           ),
         );
@@ -411,47 +749,73 @@ class _StatCardState extends State<_StatCard> with SingleTickerProviderStateMixi
   }
 }
 
-// ─── Quick Action Button ─────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// ACTION CARD
+// ═════════════════════════════════════════════════════════════
 
-class _QuickAction extends StatelessWidget {
+class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String label;
+  final String subtitle;
   final Color color;
   final VoidCallback onTap;
 
-  const _QuickAction({
+  const _ActionCard({
     required this.icon,
     required this.label,
+    required this.subtitle,
     required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onTap();
+        },
         child: Container(
-          width: 82,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.15)),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 12),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 6),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(height: 8),
               Text(
                 label,
-                style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E293B),
+                ),
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 1),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey.shade400,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
             ],
           ),
@@ -461,24 +825,29 @@ class _QuickAction extends StatelessWidget {
   }
 }
 
-// ─── Recent Incident Card ────────────────────────────────────
+// ═════════════════════════════════════════════════════════════
+// INCIDENT ROW
+// ═════════════════════════════════════════════════════════════
 
-class _RecentIncidentCard extends StatelessWidget {
+class _IncidentRow extends StatelessWidget {
   final Map<String, dynamic> incident;
   final VoidCallback onTap;
 
-  const _RecentIncidentCard({required this.incident, required this.onTap});
+  const _IncidentRow({required this.incident, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
-    final status = (incident['status'] ?? 'unknown') as String;
-    final severity = (incident['severity'] ?? '') as String;
-    final incNumber = incident['incident_number'] as String? ?? '#${incident['id']}';
-    final description = (incident['description'] ?? '') as String;
-    final reportedAt = incident['reported_at'] as String? ?? incident['created_at'] as String?;
+    final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown').toString();
+    final status = (incident['status'] ?? 'unknown').toString();
+    final severity = (incident['severity'] ?? '').toString();
+    final incNumber = incident['incident_number']?.toString() ?? '#${incident['id']}';
+    final municipality = incident['municipality']?.toString();
+    final barangay = incident['barangay']?.toString();
+    final reportedAt = incident['reported_at']?.toString() ??
+        incident['created_at']?.toString();
 
     final sevColor = AppColors.incidentSeverityColor(severity);
+    final statColor = AppColors.incidentStatusColor(status);
 
     String timeStr = '';
     if (reportedAt != null) {
@@ -489,156 +858,175 @@ class _RecentIncidentCard extends StatelessWidget {
       }
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: IntrinsicHeight(
-          child: Row(
-            children: [
-              // Severity color bar
-              Container(width: 5, color: sevColor),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    // Build location string
+    final location = [barangay, municipality]
+        .where((s) => s != null && s.isNotEmpty)
+        .join(', ');
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            // Type icon with severity indicator
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: sevColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(_typeIcon(type), color: sevColor, size: 18),
+            ),
+            const SizedBox(width: 12),
+
+            // Content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title row
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          Icon(_typeIcon(type), size: 16, color: sevColor),
-                          const SizedBox(width: 6),
-                          Text(
-                            incNumber,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'monospace',
-                            ),
+                      Expanded(
+                        child: Text(
+                          _formatType(type),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1E293B),
+                            letterSpacing: -0.1,
                           ),
-                          const Spacer(),
-                          if (timeStr.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                timeStr,
-                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        type.replaceAll('_', ' ').toUpperCase(),
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (description.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          description,
-                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ],
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          _statusChip(status),
-                          const SizedBox(width: 6),
-                          _severityBadge(severity, sevColor),
-                        ],
                       ),
+                      if (timeStr.isNotEmpty)
+                        Text(
+                          timeStr,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade400,
+                          ),
+                        ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 3),
+
+                  // Number + location
+                  Row(
+                    children: [
+                      Text(
+                        incNumber,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey.shade500,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      if (location.isNotEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text('·',
+                              style: TextStyle(
+                                  fontSize: 10, color: Colors.grey.shade400)),
+                        ),
+                        Expanded(
+                          child: Text(
+                            location,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade400,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Status + severity chips
+                  Row(
+                    children: [
+                      _chip(
+                        status.replaceAll('_', ' '),
+                        statColor,
+                      ),
+                      if (severity.isNotEmpty) ...[
+                        const SizedBox(width: 4),
+                        _chip(severity, sevColor),
+                      ],
+                    ],
+                  ),
+                ],
               ),
-              const Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: Icon(Icons.chevron_right, size: 20, color: AppColors.textHint),
-              ),
-            ],
-          ),
+            ),
+
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: Colors.grey.shade300),
+          ],
         ),
       ),
     );
   }
 
-  Widget _statusChip(String status) {
-    final color = AppColors.incidentStatusColor(status);
+  Widget _chip(String text, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        status.replaceAll('_', ' ').toUpperCase(),
-        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color),
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.w700,
+          color: color,
+          letterSpacing: 0.5,
+        ),
       ),
     );
   }
 
-  Widget _severityBadge(String severity, Color color) {
-    if (severity.isEmpty) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        severity.toUpperCase(),
-        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color),
-      ),
-    );
+  String _formatType(String type) {
+    return type
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((w) => w.isNotEmpty
+            ? '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}'
+            : '')
+        .join(' ');
   }
 
   IconData _typeIcon(String type) {
     switch (type.toLowerCase()) {
       case 'fire':
-        return Icons.local_fire_department;
+        return Icons.local_fire_department_rounded;
       case 'medical_emergency':
       case 'medical':
-        return Icons.local_hospital;
+        return Icons.local_hospital_rounded;
       case 'vehicular_accident':
       case 'accident':
-        return Icons.car_crash;
+        return Icons.car_crash_rounded;
       case 'flood':
-        return Icons.flood;
+        return Icons.flood_rounded;
       case 'natural_disaster':
       case 'earthquake':
       case 'landslide':
       case 'typhoon':
-        return Icons.public;
+        return Icons.public_rounded;
       case 'rescue':
-        return Icons.health_and_safety;
+        return Icons.health_and_safety_rounded;
       case 'crime':
-        return Icons.gavel;
+        return Icons.gavel_rounded;
       default:
-        return Icons.warning_amber;
+        return Icons.warning_amber_rounded;
     }
-  }
-}
-
-/// Animated widget helper — wraps AnimatedWidget to rebuild on animation ticks.
-class AnimatedBuilder2 extends AnimatedWidget {
-  final Widget Function(BuildContext, Widget?) builder;
-
-  const AnimatedBuilder2({super.key, required Animation<double> animation, required this.builder})
-      : super(listenable: animation);
-
-  @override
-  Widget build(BuildContext context) {
-    return builder(context, null);
   }
 }

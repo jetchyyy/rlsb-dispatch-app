@@ -86,7 +86,24 @@ class _InjuryMapperScreenState extends State<InjuryMapperScreen> {
     final incidentProvider = context.watch<IncidentProvider>();
     final injuryProvider = context.watch<InjuryProvider>();
     final incident = incidentProvider.currentIncident;
-    final patientName = incident?.patientName ?? 'Patient';
+    
+    // Extract patient name from incident data
+    String patientName = 'Patient';
+    if (incident != null) {
+      // Try to get name from citizen object first
+      final citizen = incident['citizen'] as Map<String, dynamic>?;
+      if (citizen != null) {
+        final firstName = citizen['first_name'] as String? ?? '';
+        final lastName = citizen['last_name'] as String? ?? '';
+        if (firstName.isNotEmpty || lastName.isNotEmpty) {
+          patientName = '$firstName $lastName'.trim();
+        }
+      }
+      // Fallback to incident title or description
+      if (patientName == 'Patient') {
+        patientName = incident['incident_title'] as String? ?? 'Patient';
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(

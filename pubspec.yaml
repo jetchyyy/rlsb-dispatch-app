@@ -21,6 +21,7 @@ dependencies:
 
   # Local Storage
   shared_preferences: ^2.2.0
+  flutter_secure_storage: ^9.0.0
 
   # Routing
   go_router: ^7.0.0

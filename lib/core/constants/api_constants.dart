@@ -43,6 +43,9 @@ class ApiConstants {
   static const String locationSharingStatus = '/location/sharing-status';
   static const String locationToggleSharing = '/location/toggle-sharing';
 
+  // Injury Report Endpoints
+  static String injuryReport(int incidentId) => '/incidents/$incidentId/injury-report';
+
   // Headers
   static const String contentType = 'Content-Type';
   static const String accept = 'Accept';

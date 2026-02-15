@@ -138,20 +138,28 @@ class _BodyDiagramWidgetState extends State<BodyDiagramWidget> {
           onTapUp: (details) => _onTapUp(details, size, view),
           child: Stack(
             children: [
-              // (a) Body silhouette
+              // Background
               Positioned.fill(
-                child: Image.asset(
-                  assetPath,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Center(
+                child: Container(
+                  color: Colors.grey[100],
+                  child: Center(
                     child: Icon(
                       view == BodyView.front
                           ? Icons.accessibility_new
                           : Icons.accessibility,
-                      size: 200,
+                      size: constraints.maxHeight * 0.8,
                       color: Colors.grey[300],
                     ),
                   ),
+                ),
+              ),
+              
+              // (a) Body silhouette image (if available)
+              Positioned.fill(
+                child: Image.asset(
+                  assetPath,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),
 

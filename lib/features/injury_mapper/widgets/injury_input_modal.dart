@@ -14,11 +14,16 @@ class InjuryInputModal extends StatefulWidget {
 
   /// Convenience method to show the modal.
   static void show(BuildContext context, BodyRegion region) {
+    final injuryProvider = Provider.of<InjuryProvider>(context, listen: false);
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => InjuryInputModal(region: region),
+      builder: (_) => ChangeNotifierProvider.value(
+        value: injuryProvider,
+        child: InjuryInputModal(region: region),
+      ),
     );
   }
 
