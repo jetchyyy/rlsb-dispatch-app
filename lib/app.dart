@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'core/constants/app_colors.dart';
+import 'core/providers/incident_provider.dart';
+import 'core/widgets/incident_alert_overlay.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
@@ -13,8 +15,43 @@ import 'features/incidents/screens/analytics_screen.dart';
 import 'features/map/screens/live_map_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
 
-class App extends StatelessWidget {
+class App extends StatefulWidget {
   const App({super.key});
+
+  @override
+  State<App> createState() => _AppState();
+}
+
+class _AppState extends State<App> {
+  List<Map<String, dynamic>>? _pendingAlertIncidents;
+
+  @override
+  void initState() {
+    super.initState();
+    // Register the alarm callback after the first frame so providers are ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _registerAlarmCallback();
+    });
+  }
+
+  void _registerAlarmCallback() {
+    final incidentProvider = context.read<IncidentProvider>();
+    incidentProvider.alarmService.onNewIncidents = (newIncidents) {
+      if (mounted) {
+        setState(() {
+          _pendingAlertIncidents = newIncidents;
+        });
+      }
+    };
+  }
+
+  void _dismissAlert() {
+    final incidentProvider = context.read<IncidentProvider>();
+    incidentProvider.alarmService.stopAlarm();
+    setState(() {
+      _pendingAlertIncidents = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +72,24 @@ class App extends StatelessWidget {
         ),
       ),
       routerConfig: _router(context),
+      builder: (context, child) {
+        return Stack(
+          children: [
+            // The actual routed page
+            child ?? const SizedBox.shrink(),
+
+            // Red flash overlay when new incidents arrive
+            if (_pendingAlertIncidents != null &&
+                _pendingAlertIncidents!.isNotEmpty)
+              Positioned.fill(
+                child: IncidentAlertOverlay(
+                  newIncidents: _pendingAlertIncidents!,
+                  onDismiss: _dismissAlert,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 

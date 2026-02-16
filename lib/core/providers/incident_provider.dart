@@ -5,13 +5,16 @@ import 'package:flutter/foundation.dart';
 
 import '../constants/api_constants.dart';
 import '../network/api_client.dart';
+import '../services/incident_alarm_service.dart';
 
 /// Manages incident list, detail, statistics, and CRUD state
 /// with detailed debug logging.
 class IncidentProvider extends ChangeNotifier {
   final ApiClient _api;
+  final IncidentAlarmService alarmService;
 
-  IncidentProvider(this._api);
+  IncidentProvider(this._api, {IncidentAlarmService? alarmService})
+      : alarmService = alarmService ?? IncidentAlarmService();
 
   // ── State ──────────────────────────────────────────────────
 
@@ -51,6 +54,8 @@ class IncidentProvider extends ChangeNotifier {
   int get incidentCount => _incidents.length;
   int get totalCount => _total;
   bool get hasMore => _currentPage < _lastPage;
+  int get currentPage => _currentPage;
+  int get lastPage => _lastPage;
 
   String? get statusFilter => _statusFilter;
   String? get severityFilter => _severityFilter;
@@ -60,14 +65,26 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Computed Stats ─────────────────────────────────────────
 
-  int get activeCount => _statistics?['active_incidents'] ?? _incidents.where((i) =>
-      !['resolved', 'closed', 'cancelled'].contains((i['status'] ?? '').toString().toLowerCase())).length;
+  int get activeCount =>
+      _statistics?['active_incidents'] ??
+      _incidents
+          .where((i) => !['resolved', 'closed', 'cancelled']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length;
 
-  int get criticalCount => _statistics?['critical_incidents'] ?? _incidents.where((i) =>
-      (i['severity'] ?? '').toString().toLowerCase() == 'critical').length;
+  int get criticalCount =>
+      _statistics?['critical_incidents'] ??
+      _incidents
+          .where((i) =>
+              (i['severity'] ?? '').toString().toLowerCase() == 'critical')
+          .length;
 
-  int get newCount => _statistics?['new_incidents'] ?? _incidents.where((i) =>
-      (i['status'] ?? '').toString().toLowerCase() == 'reported').length;
+  int get newCount =>
+      _statistics?['new_incidents'] ??
+      _incidents
+          .where(
+              (i) => (i['status'] ?? '').toString().toLowerCase() == 'reported')
+          .length;
 
   int get todayTotal => _statistics?['today_total'] ?? _incidents.length;
 
@@ -90,6 +107,7 @@ class IncidentProvider extends ChangeNotifier {
   @override
   void dispose() {
     stopAutoRefresh();
+    alarmService.dispose();
     super.dispose();
   }
 
@@ -124,8 +142,10 @@ class IncidentProvider extends ChangeNotifier {
     if (_statusFilter != null) params['status'] = _statusFilter;
     if (_severityFilter != null) params['severity'] = _severityFilter;
     if (_typeFilter != null) params['type'] = _typeFilter;
-    if (_municipalityFilter != null) params['municipality'] = _municipalityFilter;
-    if (_searchQuery != null && _searchQuery!.isNotEmpty) params['search'] = _searchQuery;
+    if (_municipalityFilter != null)
+      params['municipality'] = _municipalityFilter;
+    if (_searchQuery != null && _searchQuery!.isNotEmpty)
+      params['search'] = _searchQuery;
     return params;
   }
 
@@ -146,13 +166,18 @@ class IncidentProvider extends ChangeNotifier {
 
     // Compute stats from local data
     _statistics = {
-      'active_incidents': _incidents.where((i) =>
-          !['resolved', 'closed', 'cancelled'].contains(
-              (i['status'] ?? '').toString().toLowerCase())).length,
-      'critical_incidents': _incidents.where((i) =>
-          (i['severity'] ?? '').toString().toLowerCase() == 'critical').length,
-      'new_incidents': _incidents.where((i) =>
-          (i['status'] ?? '').toString().toLowerCase() == 'reported').length,
+      'active_incidents': _incidents
+          .where((i) => !['resolved', 'closed', 'cancelled']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length,
+      'critical_incidents': _incidents
+          .where((i) =>
+              (i['severity'] ?? '').toString().toLowerCase() == 'critical')
+          .length,
+      'new_incidents': _incidents
+          .where(
+              (i) => (i['status'] ?? '').toString().toLowerCase() == 'reported')
+          .length,
       'today_total': _incidents.length,
     };
 
@@ -261,12 +286,48 @@ class IncidentProvider extends ChangeNotifier {
       }
 
       _incidents.addAll(newItems.cast<Map<String, dynamic>>());
-      debugPrint('  ✅ Loaded ${newItems.length} more (total: ${_incidents.length})');
+      debugPrint(
+          '  ✅ Loaded ${newItems.length} more (total: ${_incidents.length})');
     } on DioException catch (e) {
       debugPrint('  ❌ Load more failed: ${e.message}');
     }
 
     _isLoadingMore = false;
+    notifyListeners();
+  }
+
+  // ── Go to Specific Page ────────────────────────────────────
+
+  Future<void> goToPage(int page) async {
+    if (page < 1 || page > _lastPage || page == _currentPage) return;
+    if (_isLoading) return;
+
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    final params = _buildQueryParams(page: page);
+
+    debugPrint('');
+    debugPrint('📄 GO TO PAGE — Page $page of $_lastPage');
+
+    try {
+      final response = await _api.get(
+        ApiConstants.incidentsEndpoint,
+        queryParameters: params,
+      );
+
+      _parseIncidentList(response.data);
+      _currentPage = page;
+      debugPrint('  ✅ Loaded page $page with ${_incidents.length} items');
+    } on DioException catch (e) {
+      _handleDioError(e);
+    } catch (e) {
+      debugPrint('  ❌ Go to page failed: $e');
+      _errorMessage = 'Failed to load page';
+    }
+
+    _isLoading = false;
     notifyListeners();
   }
 
@@ -286,7 +347,7 @@ class IncidentProvider extends ChangeNotifier {
 
     try {
       final stopwatch = Stopwatch()..start();
-      
+
       // Add query parameters to load relationships
       // Try both 'include' (common in Laravel APIs with Spatie QueryBuilder)
       // and 'with' (custom Laravel implementations)
@@ -294,9 +355,9 @@ class IncidentProvider extends ChangeNotifier {
         'include': 'citizen,assigned_user',
         'with': 'citizen,assigned_user',
       };
-      
+
       debugPrint('  📎 Query params: $queryParams');
-      
+
       final response = await _api.get(endpoint, queryParameters: queryParams);
       stopwatch.stop();
 
@@ -306,20 +367,22 @@ class IncidentProvider extends ChangeNotifier {
       if (data is Map<String, dynamic>) {
         // The API likely returns {success: true, incident: {...}}
         // Try 'incident' key first (singular), then 'data', then fall back to full response
-        _currentIncident = data['incident'] as Map<String, dynamic>? 
-            ?? data['data'] as Map<String, dynamic>? 
-            ?? data;
-        
+        _currentIncident = data['incident'] as Map<String, dynamic>? ??
+            data['data'] as Map<String, dynamic>? ??
+            data;
+
         // Debug: Log the raw response structure first
         debugPrint('  📋 Response structure:');
         debugPrint('    - Has "incident" key: ${data.containsKey('incident')}');
         debugPrint('    - Has "data" key: ${data.containsKey('data')}');
-        debugPrint('    - Has "success" key: ${data.containsKey('success')} (${data['success']})');
+        debugPrint(
+            '    - Has "success" key: ${data.containsKey('success')} (${data['success']})');
         debugPrint('    - Keys: ${data.keys.toList()}');
-        
+
         // Debug: Log the FULL incident data to see what we're getting
         debugPrint('  📋 Full incident data:');
-        final incidentJson = const JsonEncoder.withIndent('    ').convert(_currentIncident);
+        final incidentJson =
+            const JsonEncoder.withIndent('    ').convert(_currentIncident);
         final lines = incidentJson.split('\n');
         final maxLines = lines.length < 50 ? lines.length : 50;
         for (var i = 0; i < maxLines; i++) {
@@ -328,22 +391,24 @@ class IncidentProvider extends ChangeNotifier {
         if (lines.length > 50) {
           debugPrint('    ... [${lines.length - 50} more lines]');
         }
-        
+
         debugPrint('  📋 Loaded: #${_currentIncident?['incident_number']} '
             'status=${_currentIncident?['status']} '
             'severity=${_currentIncident?['severity']}');
-        
+
         // Debug log to check if relationships are loaded
         final hasCitizen = _currentIncident?['citizen'] != null;
         final hasAssignedUser = _currentIncident?['assigned_user'] != null;
         final hasCitizenId = _currentIncident?['citizen_id'] != null;
         final hasAssignedToId = _currentIncident?['assigned_to'] != null;
-        
+
         debugPrint('  👤 Citizen object loaded: $hasCitizen');
-        debugPrint('  🆔 Citizen ID present: $hasCitizenId (value: ${_currentIncident?['citizen_id']})');
+        debugPrint(
+            '  🆔 Citizen ID present: $hasCitizenId (value: ${_currentIncident?['citizen_id']})');
         debugPrint('  🚨 Assigned User object loaded: $hasAssignedUser');
-        debugPrint('  🆔 Assigned To ID present: $hasAssignedToId (value: ${_currentIncident?['assigned_to']})');
-        
+        debugPrint(
+            '  🆔 Assigned To ID present: $hasAssignedToId (value: ${_currentIncident?['assigned_to']})');
+
         if (hasCitizen) {
           final citizenName = _currentIncident?['citizen']?['name'];
           debugPrint('     ✅ Citizen name: $citizenName');
@@ -375,7 +440,8 @@ class IncidentProvider extends ChangeNotifier {
     debugPrint('═══════════════════════════════════════════════════');
     debugPrint('➕ CREATE INCIDENT');
     debugPrint('═══════════════════════════════════════════════════');
-    debugPrint('  📦 Data: ${const JsonEncoder.withIndent("  ").convert(incidentData)}');
+    debugPrint(
+        '  📦 Data: ${const JsonEncoder.withIndent("  ").convert(incidentData)}');
 
     try {
       final response = await _api.post(
@@ -399,9 +465,11 @@ class IncidentProvider extends ChangeNotifier {
       if (e.response?.data is Map<String, dynamic>) {
         final errors = e.response!.data['errors'];
         if (errors is Map) {
-          _errorMessage = errors.values.expand((e) => e is List ? e : [e]).join('\n');
+          _errorMessage =
+              errors.values.expand((e) => e is List ? e : [e]).join('\n');
         } else {
-          _errorMessage = e.response!.data['message']?.toString() ?? 'Failed to create incident.';
+          _errorMessage = e.response!.data['message']?.toString() ??
+              'Failed to create incident.';
         }
       } else {
         _errorMessage = 'Failed to create incident.';
@@ -419,19 +487,23 @@ class IncidentProvider extends ChangeNotifier {
   // ── Incident Actions ───────────────────────────────────────
 
   Future<bool> acknowledgeIncident(int id, {String? notes}) async {
-    return _performAction(id, 'acknowledge', ApiConstants.incidentAcknowledge(id), notes);
+    return _performAction(
+        id, 'acknowledge', ApiConstants.incidentAcknowledge(id), notes);
   }
 
   Future<bool> respondToIncident(int id, {String? notes}) async {
-    return _performAction(id, 'respond', ApiConstants.incidentRespond(id), notes);
+    return _performAction(
+        id, 'respond', ApiConstants.incidentRespond(id), notes);
   }
 
   Future<bool> markOnScene(int id, {String? notes}) async {
-    return _performAction(id, 'on-scene', ApiConstants.incidentOnScene(id), notes);
+    return _performAction(
+        id, 'on-scene', ApiConstants.incidentOnScene(id), notes);
   }
 
   Future<bool> resolveIncident(int id, {String? notes}) async {
-    return _performAction(id, 'resolve', ApiConstants.incidentResolve(id), notes);
+    return _performAction(
+        id, 'resolve', ApiConstants.incidentResolve(id), notes);
   }
 
   Future<bool> closeIncident(int id, {String? notes}) async {
@@ -442,11 +514,14 @@ class IncidentProvider extends ChangeNotifier {
     return _performAction(id, 'cancel', ApiConstants.incidentCancel(id), notes);
   }
 
-  Future<bool> _performAction(int id, String action, String endpoint, String? notes) async {
+  Future<bool> _performAction(
+      int id, String action, String endpoint, String? notes) async {
     final fullUrl = '${ApiConstants.baseUrl}$endpoint';
     debugPrint('🔄 Incident #$id action: $action');
     debugPrint('  📡 Full URL: POST $fullUrl');
-    debugPrint('  📎 Data: ${notes != null && notes.isNotEmpty ? {'notes': notes} : 'null'}');
+    debugPrint('  📎 Data: ${notes != null && notes.isNotEmpty ? {
+        'notes': notes
+      } : 'null'}');
 
     try {
       final response = await _api.post(
@@ -455,22 +530,23 @@ class IncidentProvider extends ChangeNotifier {
       );
       debugPrint('  ✅ Action completed: ${response.statusCode}');
       debugPrint('  📋 Response: ${response.data}');
-      
+
       // Refresh incident detail and list
       await Future.wait([
         fetchIncident(id),
         fetchIncidents(silent: true),
       ]);
-      
+
       return true;
     } on DioException catch (e) {
       debugPrint('  ❌ Action failed: ${e.response?.statusCode}');
       debugPrint('  📋 Error response: ${e.response?.data}');
       debugPrint('  🔍 Error type: ${e.type}');
       debugPrint('  💬 Error message: ${e.message}');
-      
+
       if (e.response?.data is Map<String, dynamic>) {
-        _errorMessage = e.response!.data['message']?.toString() ?? 'Failed to $action incident.';
+        _errorMessage = e.response!.data['message']?.toString() ??
+            'Failed to $action incident.';
       } else {
         _errorMessage = 'Failed to $action incident.';
       }
@@ -485,7 +561,8 @@ class IncidentProvider extends ChangeNotifier {
     debugPrint('📍 Fetching location updates for incident #$id');
 
     try {
-      final response = await _api.get('${ApiConstants.incidentsEndpoint}/$id/location-updates');
+      final response = await _api
+          .get('${ApiConstants.incidentsEndpoint}/$id/location-updates');
       final data = response.data;
       if (data is Map<String, dynamic> && data['data'] is List) {
         final updates = (data['data'] as List).cast<Map<String, dynamic>>();
@@ -515,7 +592,8 @@ class IncidentProvider extends ChangeNotifier {
           _lastPage = (pag['last_page'] as int?) ?? 1;
           _total = (pag['total'] as int?) ?? list.length;
         }
-        debugPrint('  ✅ Found "incidents" key with ${list.length} items, page $_currentPage/$_lastPage, total $_total');
+        debugPrint(
+            '  ✅ Found "incidents" key with ${list.length} items, page $_currentPage/$_lastPage, total $_total');
       } else if (data.containsKey('data') && data['data'] is List) {
         list = data['data'] as List;
         debugPrint('  ✅ Found "data" key with ${list.length} items');
@@ -525,14 +603,17 @@ class IncidentProvider extends ChangeNotifier {
         _currentPage = (inner['current_page'] as int?) ?? 1;
         _lastPage = (inner['last_page'] as int?) ?? 1;
         _total = (inner['total'] as int?) ?? list.length;
-        debugPrint('  ✅ Paginated: ${list.length} items, page $_currentPage/$_lastPage, total $_total');
+        debugPrint(
+            '  ✅ Paginated: ${list.length} items, page $_currentPage/$_lastPage, total $_total');
       } else {
         list = [];
         debugPrint('  ⚠️ Unexpected map keys: ${data.keys.toList()}');
       }
 
-      if (data.containsKey('success')) debugPrint('  📌 success: ${data['success']}');
-      if (data.containsKey('message')) debugPrint('  📌 message: ${data['message']}');
+      if (data.containsKey('success'))
+        debugPrint('  📌 success: ${data['success']}');
+      if (data.containsKey('message'))
+        debugPrint('  📌 message: ${data['message']}');
     } else if (data is List) {
       list = data;
       debugPrint('  🔍 Response is List with ${list.length} items');
@@ -543,6 +624,9 @@ class IncidentProvider extends ChangeNotifier {
 
     _incidents = list.cast<Map<String, dynamic>>();
     if (_total == 0) _total = _incidents.length;
+
+    // Check for new incidents and trigger alarm if found
+    alarmService.checkForNewIncidents(_incidents);
 
     debugPrint('───────────────────────────────────────────────────');
     debugPrint('  📋 INCIDENT SUMMARY (${_incidents.length} total):');
@@ -580,7 +664,8 @@ class IncidentProvider extends ChangeNotifier {
 
   void _logFinalState() {
     debugPrint('───────────────────────────────────────────────────');
-    debugPrint('  📊 Final: ${_incidents.length} incidents, error=${_errorMessage ?? "none"}');
+    debugPrint(
+        '  📊 Final: ${_incidents.length} incidents, error=${_errorMessage ?? "none"}');
     debugPrint('═══════════════════════════════════════════════════');
   }
 

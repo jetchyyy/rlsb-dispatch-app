@@ -8,6 +8,7 @@ import 'app.dart';
 import 'core/network/api_client.dart';
 import 'core/providers/incident_provider.dart';
 import 'core/providers/injury_provider.dart';
+import 'core/services/map_preloader.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -53,6 +54,9 @@ void main() async {
 
   // Check if user is already logged in
   await authProvider.checkAuthStatus();
+
+  // Preload map tiles in background (non-blocking)
+  MapPreloader().preloadTiles();
 
   runApp(
     MultiProvider(

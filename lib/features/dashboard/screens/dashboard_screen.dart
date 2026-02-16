@@ -7,6 +7,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
+import '../widgets/map_preview_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -101,7 +102,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         const SizedBox(height: 28),
 
                         // Quick actions
-                        _buildQuickActions(context),
+                        _buildQuickActions(context, ip),
 
                         // Error banner
                         if (ip.errorMessage != null) ...[
@@ -325,7 +326,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   // QUICK ACTIONS
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildQuickActions(BuildContext context) {
+  Widget _buildQuickActions(BuildContext context, IncidentProvider ip) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -355,16 +356,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(width: 10),
               Expanded(
                 child: _ActionCard(
-                  icon: Icons.map_outlined,
-                  label: 'Live Map',
-                  subtitle: 'Track',
-                  color: const Color(0xFF06B6D4),
-                  onTap: () => context.push('/map'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _ActionCard(
                   icon: Icons.analytics_outlined,
                   label: 'Analytics',
                   subtitle: 'Reports',
@@ -373,6 +364,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          // Map preview (full width)
+          MapPreviewCard(
+            incidents: ip.incidents,
+            onTap: () => context.push('/map'),
           ),
         ],
       ),
@@ -450,7 +447,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'RECENT INCIDENTS',
+                'ACTIVE INCIDENTS',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -543,7 +540,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildIncidentList(IncidentProvider ip) {
-    final incidents = ip.incidents.take(5).toList();
+    // Filter out resolved/closed/cancelled incidents
+    final activeIncidents = ip.incidents
+        .where((incident) {
+          final status = (incident['status'] ?? '').toString().toLowerCase();
+          return !['resolved', 'closed', 'cancelled'].contains(status);
+        })
+        .take(5)
+        .toList();
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -559,15 +564,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          for (int i = 0; i < incidents.length; i++) ...[
+          for (int i = 0; i < activeIncidents.length; i++) ...[
             _IncidentRow(
-              incident: incidents[i],
+              incident: activeIncidents[i],
               onTap: () {
-                final id = incidents[i]['id'];
+                final id = activeIncidents[i]['id'];
                 if (id != null) context.push('/incidents/$id');
               },
             ),
-            if (i < incidents.length - 1)
+            if (i < activeIncidents.length - 1)
               Divider(
                 height: 1,
                 thickness: 1,
@@ -837,10 +842,12 @@ class _IncidentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown').toString();
+    final type =
+        (incident['incident_type'] ?? incident['type'] ?? 'Unknown').toString();
     final status = (incident['status'] ?? 'unknown').toString();
     final severity = (incident['severity'] ?? '').toString();
-    final incNumber = incident['incident_number']?.toString() ?? '#${incident['id']}';
+    final incNumber =
+        incident['incident_number']?.toString() ?? '#${incident['id']}';
     final municipality = incident['municipality']?.toString();
     final barangay = incident['barangay']?.toString();
     final reportedAt = incident['reported_at']?.toString() ??
