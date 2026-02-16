@@ -1,7 +1,10 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-// Run `dart run build_runner build` to regenerate.
 
 part of 'injury_entry.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
 
 InjuryEntry _$InjuryEntryFromJson(Map<String, dynamic> json) => InjuryEntry(
       type: json['type'] as String,

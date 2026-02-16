@@ -1,7 +1,10 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-// Run `dart run build_runner build` to regenerate.
 
 part of 'responder.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
 
 Responder _$ResponderFromJson(Map<String, dynamic> json) => Responder(
       id: (json['id'] as num).toInt(),
@@ -17,8 +20,7 @@ Responder _$ResponderFromJson(Map<String, dynamic> json) => Responder(
       updatedAt: json['updated_at'] as String?,
     );
 
-Map<String, dynamic> _$ResponderToJson(Responder instance) =>
-    <String, dynamic>{
+Map<String, dynamic> _$ResponderToJson(Responder instance) => <String, dynamic>{
       'id': instance.id,
       'name': instance.name,
       'email': instance.email,

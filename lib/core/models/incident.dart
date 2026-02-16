@@ -26,6 +26,8 @@ class Incident {
   @JsonKey(name: 'patient_contact')
   final String? patientContact;
   final String? notes;
+  @JsonKey(name: 'e_street_form')
+  final String? eStreetForm;
   @JsonKey(name: 'created_at')
   final String? createdAt;
   @JsonKey(name: 'updated_at')
@@ -48,6 +50,7 @@ class Incident {
     this.patientGender,
     this.patientContact,
     this.notes,
+    this.eStreetForm,
     this.createdAt,
     this.updatedAt,
   });

@@ -1,7 +1,10 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-// Run `dart run build_runner build` to regenerate.
 
 part of 'assignment.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
 
 Assignment _$AssignmentFromJson(Map<String, dynamic> json) => Assignment(
       id: (json['id'] as num).toInt(),
@@ -37,7 +40,7 @@ Map<String, dynamic> _$AssignmentToJson(Assignment instance) =>
       'on_scene_at': instance.onSceneAt,
       'completed_at': instance.completedAt,
       'rejection_reason': instance.rejectionReason,
-      'incident': instance.incident?.toJson(),
+      'incident': instance.incident,
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
     };

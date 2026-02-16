@@ -6,6 +6,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../../core/widgets/custom_button.dart';
 import '../../../core/widgets/loading_indicator.dart';
+import '../widgets/e_street_form_display.dart';
 
 class IncidentDetailScreen extends StatefulWidget {
   final int incidentId;
@@ -192,6 +193,14 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                               style: const TextStyle(fontSize: 14),
                             ),
                           ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
+                      // ── E-Street Form ────────────────────────
+                      if (incident.eStreetForm != null) ...[
+                        EStreetFormDisplay(
+                          eStreetFormJson: incident.eStreetForm,
                         ),
                         const SizedBox(height: 16),
                       ],

@@ -46,6 +46,9 @@ class ApiConstants {
   // Injury Report Endpoints
   static String injuryReport(int incidentId) => '/incidents/$incidentId/injury-report';
 
+  // E-Street Form Endpoints
+  static String eStreetForm(int incidentId) => '/incidents/$incidentId/e-street-form';
+
   // Headers
   static const String contentType = 'Content-Type';
   static const String accept = 'Accept';

@@ -1,7 +1,10 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
-// Run `dart run build_runner build` to regenerate.
 
 part of 'incident.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
 
 Incident _$IncidentFromJson(Map<String, dynamic> json) => Incident(
       id: (json['id'] as num).toInt(),
@@ -20,12 +23,12 @@ Incident _$IncidentFromJson(Map<String, dynamic> json) => Incident(
       patientGender: json['patient_gender'] as String?,
       patientContact: json['patient_contact'] as String?,
       notes: json['notes'] as String?,
+      eStreetForm: json['e_street_form'] as String?,
       createdAt: json['created_at'] as String?,
       updatedAt: json['updated_at'] as String?,
     );
 
-Map<String, dynamic> _$IncidentToJson(Incident instance) =>
-    <String, dynamic>{
+Map<String, dynamic> _$IncidentToJson(Incident instance) => <String, dynamic>{
       'id': instance.id,
       'type': instance.type,
       'title': instance.title,
@@ -42,6 +45,7 @@ Map<String, dynamic> _$IncidentToJson(Incident instance) =>
       'patient_gender': instance.patientGender,
       'patient_contact': instance.patientContact,
       'notes': instance.notes,
+      'e_street_form': instance.eStreetForm,
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
     };

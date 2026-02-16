@@ -7,7 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
-import '../../injury_mapper/screens/injury_mapper_screen.dart';
+import '../../e_street_form/screens/e_street_form_screen.dart';
+import '../../e_street_form/models/e_street_form_model.dart';
+import '../../e_street_form/services/e_street_local_storage.dart';
+import '../../e_street_form/services/e_street_pdf_generator.dart';
+import '../../e_street_form/widgets/e_street_form_data_display.dart';
 
 class IncidentDetailScreen extends StatefulWidget {
   final int incidentId;
@@ -66,7 +70,10 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => InjuryMapperScreen(incidentId: widget.incidentId),
+            builder: (context) => EStreetFormScreen(
+              incidentId: widget.incidentId,
+              incidentData: incident,
+            ),
           ),
         );
       });
@@ -142,7 +149,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     final status = (incident['status'] ?? 'unknown').toString().toLowerCase();
     final next = _nextStatus[status];
 
-    // Terminal states — no action available
+    // Terminal states — no status action but E-Street Form still available
     if (next == null) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -161,14 +168,41 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 color: AppColors.incidentStatusColor(status),
               ),
               const SizedBox(width: 8),
-              Text(
-                status == 'resolved' || status == 'closed'
-                    ? 'This incident has been ${status.replaceAll('_', ' ')}'
-                    : 'Status: ${status.replaceAll('_', ' ').toUpperCase()}',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: AppColors.incidentStatusColor(status),
-                  fontWeight: FontWeight.w500,
+              Expanded(
+                child: Text(
+                  status == 'resolved' || status == 'closed'
+                      ? 'Incident ${status.replaceAll('_', ' ')}'
+                      : 'Status: ${status.replaceAll('_', ' ').toUpperCase()}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.incidentStatusColor(status),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EStreetFormScreen(
+                        incidentId: widget.incidentId,
+                        incidentData: incident,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.assignment, size: 18),
+                label: const Text('E-Street Form', style: TextStyle(fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => _generatePdf(incident),
+                icon: const Icon(Icons.picture_as_pdf, size: 18),
+                label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red[700],
+                  side: BorderSide(color: Colors.red[700]!),
                 ),
               ),
             ],
@@ -228,7 +262,23 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   ),
                   tooltip: 'Add notes',
                 ),
-                const SizedBox(width: 8),
+                // E-Street Form button
+                IconButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EStreetFormScreen(
+                          incidentId: widget.incidentId,
+                          incidentData: incident,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.assignment, color: Color(0xFF1976D2)),
+                  tooltip: 'E-Street Form',
+                ),
+                const SizedBox(width: 4),
                 // Main action button
                 Expanded(
                   child: SizedBox(
@@ -379,14 +429,17 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         ),
       );
       
-      // If status changed to "on_scene", automatically open injury mapper
+      // If status changed to "on_scene", automatically open E-Street Form
       if (nextStatus == 'on_scene') {
         Future.delayed(const Duration(milliseconds: 500), () {
           if (!mounted) return;
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => InjuryMapperScreen(incidentId: incidentId),
+              builder: (context) => EStreetFormScreen(
+                incidentId: incidentId,
+                incidentData: ip.currentIncident,
+              ),
             ),
           );
         });
@@ -776,6 +829,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           },
         ),
 
+        // ── E-Street Form Data ────────────────────────────
+        EStreetFormDataDisplay(
+          eStreetFormJson: incident['e_street_form'] as String?,
+          incidentId: widget.incidentId,
+        ),
+
         // ── Location Updates Button ──────────────────────
         Padding(
           padding: const EdgeInsets.all(16),
@@ -955,6 +1014,76 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     }
   }
 
+  Future<void> _generatePdf(Map<String, dynamic> incident) async {
+    try {
+      // Check if E-Street form data exists
+      final eStreetFormData = incident['e_street_form'];
+      if (eStreetFormData == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No E-Street form data available. Please fill out the form first.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Parse the E-Street form data
+      Map<String, dynamic> formJson;
+      if (eStreetFormData is String) {
+        formJson = jsonDecode(eStreetFormData);
+      } else if (eStreetFormData is Map<String, dynamic>) {
+        formJson = eStreetFormData;
+      } else {
+        throw Exception('Invalid E-Street form data format');
+      }
+
+      // Create form model and enrich with locally saved images
+      final formModel = EStreetFormModel.fromJson(formJson);
+      await _enrichWithLocalImages(formModel);
+
+      // Show loading dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Generate and open PDF
+      await EStreetPdfGenerator.printPdf(formModel, widget.incidentId);
+
+      // Close loading dialog
+      if (!mounted) return;
+      Navigator.of(context).pop();
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('PDF generated successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog if open
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error message
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error generating PDF: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   IconData _typeIcon(String type) {
     switch (type.toLowerCase()) {
       case 'fire':
@@ -975,6 +1104,48 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         return Icons.gavel;
       default:
         return Icons.warning_amber;
+    }
+  }
+
+  /// Enrich form model with locally saved image data.
+  /// The API may not store large base64 signatures/body diagram data,
+  /// so we load them from local file storage (saved during form submission).
+  Future<void> _enrichWithLocalImages(EStreetFormModel formModel) async {
+    try {
+      final localData = await EStreetLocalStorage.loadAllImages(widget.incidentId);
+
+      if (localData.isEmpty) {
+        print('⚠️ No locally saved images found for incident ${widget.incidentId}');
+        return;
+      }
+
+      if (formModel.patientSignature == null && localData['patient_signature'] != null) {
+        formModel.patientSignature = localData['patient_signature'] as String;
+      }
+      if (formModel.doctorSignature == null && localData['doctor_signature'] != null) {
+        formModel.doctorSignature = localData['doctor_signature'] as String;
+      }
+      if (formModel.responderSignature == null && localData['responder_signature'] != null) {
+        formModel.responderSignature = localData['responder_signature'] as String;
+      }
+      if (formModel.bodyDiagramScreenshot == null && localData['body_diagram_screenshot'] != null) {
+        formModel.bodyDiagramScreenshot = localData['body_diagram_screenshot'] as String;
+      }
+      if (formModel.bodyObservations.isEmpty && localData['body_observations'] != null) {
+        try {
+          final obsStr = localData['body_observations'] as String;
+          final decoded = jsonDecode(obsStr);
+          if (decoded is Map) {
+            formModel.bodyObservations = decoded.map(
+              (k, v) => MapEntry(k.toString(), v.toString()),
+            );
+          }
+        } catch (e) {
+          print('⚠️ Error parsing body observations from local storage: $e');
+        }
+      }
+    } catch (e) {
+      print('⚠️ Error enriching form model with local images: $e');
     }
   }
 }
