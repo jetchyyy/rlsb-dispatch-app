@@ -31,6 +31,8 @@ enum TrackingMode {
 /// • **Offline queue** — unsent updates are persisted in a Hive box and
 ///   retried automatically on the next flush cycle.
 class LocationTrackingProvider extends ChangeNotifier {
+    // Public method to force flush the offline queue (for admin/manual use)
+    // (Implementation is below; this stub is removed)
   final ApiClient _api;
   final LocationService _locationService;
   final Box<String> _offlineBox;
@@ -51,14 +53,8 @@ class LocationTrackingProvider extends ChangeNotifier {
   bool _isTracking = false;
   String? _errorMessage;
 
-  /// In-memory buffer of location fixes not yet sent.
-  final List<Map<String, dynamic>> _locationBuffer = [];
-
   /// Timer that fires to capture a GPS fix.
   Timer? _captureTimer;
-
-  /// Timer that fires to flush the buffer to the API.
-  Timer? _flushTimer;
 
   // ── Getters ────────────────────────────────────────────────
 
@@ -67,7 +63,7 @@ class LocationTrackingProvider extends ChangeNotifier {
   Position? get lastPosition => _lastPosition;
   bool get isTracking => _isTracking;
   String? get errorMessage => _errorMessage;
-  int get pendingUpdates => _locationBuffer.length + _offlineBox.length;
+  int get pendingUpdates => _offlineBox.length;
 
   // ── Public API ─────────────────────────────────────────────
 
@@ -91,7 +87,6 @@ class LocationTrackingProvider extends ChangeNotifier {
         '📍 Passive tracking started (every ${ApiConstants.passiveTrackingInterval.inMinutes}m)');
 
     _startCaptureTimer(ApiConstants.passiveTrackingInterval);
-    _startFlushTimer();
 
     // Capture an initial fix immediately
     _capturePosition();
@@ -117,9 +112,6 @@ class LocationTrackingProvider extends ChangeNotifier {
         '📍 Active tracking started for incident #$incidentId (every ${ApiConstants.activeTrackingInterval.inSeconds}s)');
 
     _startCaptureTimer(ApiConstants.activeTrackingInterval);
-    // Keep flush timer running as-is (or restart if not running)
-    _flushTimer ??= Timer.periodic(
-        ApiConstants.batchFlushInterval, (_) => _flushBuffer());
 
     // Capture an immediate fix
     _capturePosition();
@@ -136,9 +128,6 @@ class LocationTrackingProvider extends ChangeNotifier {
         '📍 Active tracking stopped for incident #$_activeIncidentId – reverting to passive');
     _activeIncidentId = null;
 
-    // Flush any remaining active-mode fixes immediately
-    _flushBuffer();
-
     // Resume passive tracking
     _mode = TrackingMode.passive;
     _startCaptureTimer(ApiConstants.passiveTrackingInterval);
@@ -150,8 +139,6 @@ class LocationTrackingProvider extends ChangeNotifier {
     debugPrint('📍 All tracking stopped');
     _captureTimer?.cancel();
     _captureTimer = null;
-    _flushTimer?.cancel();
-    _flushTimer = null;
     _mode = TrackingMode.off;
     _isTracking = false;
     _activeIncidentId = null;
@@ -169,35 +156,44 @@ class LocationTrackingProvider extends ChangeNotifier {
     _captureTimer = Timer.periodic(interval, (_) => _capturePosition());
   }
 
-  void _startFlushTimer() {
-    _flushTimer?.cancel();
-    _flushTimer = Timer.periodic(
-        ApiConstants.batchFlushInterval, (_) => _flushBuffer());
-  }
+  // No-op: batch flush timer removed (per-fix upload)
 
   Future<void> _capturePosition() async {
     try {
       final position = await _locationService.getCurrentPosition();
       _lastPosition = position;
 
-      final entry = {
+      final entry = <String, dynamic>{
         'latitude': position.latitude,
         'longitude': position.longitude,
         'accuracy': position.accuracy,
+        'altitude': position.altitude,
         'speed': position.speed,
         'heading': position.heading,
-        'altitude': position.altitude,
-        'timestamp': position.timestamp.toUtc().toIso8601String(),
-        if (_activeIncidentId != null) 'incident_id': _activeIncidentId,
         'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
+        'captured_at': position.timestamp.toUtc().toIso8601String(),
       };
+      if (_activeIncidentId != null) {
+        entry['incident_id'] = _activeIncidentId;
+      }
 
-      _locationBuffer.add(entry);
-      debugPrint(
-          '📍 Fix captured: ${position.latitude.toStringAsFixed(6)}, '
-          '${position.longitude.toStringAsFixed(6)} '
-          '(buffer: ${_locationBuffer.length}, '
-          'mode: ${_mode.name})');
+      debugPrint('📍 Captured: $entry');
+
+      // Try to send immediately
+      try {
+        await _api.post(
+          '/location/update',
+          data: entry,
+        );
+        debugPrint('📍 Location sent to /location/update');
+      } on DioException catch (e) {
+        debugPrint('📍 Upload failed (${e.response?.statusCode}): ${e.message}');
+        // Save to offline queue for retry
+        _offlineBox.add(jsonEncode(entry));
+      } catch (e) {
+        debugPrint('📍 Upload error: $e');
+        _offlineBox.add(jsonEncode(entry));
+      }
     } catch (e) {
       debugPrint('📍 Capture error: $e');
     }
@@ -205,67 +201,43 @@ class LocationTrackingProvider extends ChangeNotifier {
 
   // ── Private — Flush / Upload ───────────────────────────────
 
-  Future<void> _flushBuffer() async {
-    // Collect everything: in-memory buffer + offline Hive queue
-    final allUpdates = <Map<String, dynamic>>[..._locationBuffer];
-
-    // Load any previously failed sends from Hive
+  /// Retry sending any failed location updates from the offline queue.
+  Future<void> flushBatch() async {
+    if (_offlineBox.isEmpty) return;
+    debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
+    final failed = <int>[];
     for (int i = 0; i < _offlineBox.length; i++) {
       try {
         final raw = _offlineBox.getAt(i);
-        if (raw != null) {
-          allUpdates.add(
-              Map<String, dynamic>.from(jsonDecode(raw) as Map));
-        }
-      } catch (_) {}
+        if (raw == null) continue;
+        final entry = jsonDecode(raw) as Map<String, dynamic>;
+        await _api.post(
+          '/location/update',
+          data: entry,
+        );
+        debugPrint('📍 Flushed offline location: $entry');
+        failed.add(i);
+      } on DioException catch (e) {
+        debugPrint('📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
+      } catch (e) {
+        debugPrint('📍 Offline upload error: $e');
+      }
     }
-
-    if (allUpdates.isEmpty) return;
-
-    debugPrint(
-        '📍 Flushing ${allUpdates.length} location updates '
-        '(${_locationBuffer.length} new + ${_offlineBox.length} queued)');
-
-    try {
-      await _api.post(
-        ApiConstants.locationBatchUpdate,
-        data: {'locations': allUpdates},
-      );
-
-      debugPrint('📍 Batch upload successful');
-
-      // Clear everything on success
-      _locationBuffer.clear();
-      await _offlineBox.clear();
-    } on DioException catch (e) {
-      debugPrint(
-          '📍 Batch upload failed (${e.response?.statusCode}): ${e.message}');
-      // Persist current in-memory buffer to Hive for retry
-      _persistBufferToHive();
-    } catch (e) {
-      debugPrint('📍 Batch upload error: $e');
-      _persistBufferToHive();
+    // Remove successfully sent entries
+    for (final idx in failed.reversed) {
+      await _offlineBox.deleteAt(idx);
     }
+    notifyListeners();
   }
 
-  /// Moves in-memory buffer entries into the Hive offline queue.
-  void _persistBufferToHive() {
-    if (_locationBuffer.isEmpty) return;
-
-    debugPrint(
-        '📍 Persisting ${_locationBuffer.length} fixes to offline queue');
-    for (final entry in _locationBuffer) {
-      _offlineBox.add(jsonEncode(entry));
-    }
-    _locationBuffer.clear();
-  }
+  /// No-op: buffer is not used anymore, only offline queue remains.
+  void _persistBufferToHive() {}
 
   // ── Dispose ────────────────────────────────────────────────
 
   @override
   void dispose() {
     _captureTimer?.cancel();
-    _flushTimer?.cancel();
     _persistBufferToHive();
     super.dispose();
   }

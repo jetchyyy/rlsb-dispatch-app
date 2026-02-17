@@ -178,6 +178,20 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
                         : () => tracker.stopAllTracking(),
                   ),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _ControlButton(
+                    label: 'Force Flush Batch',
+                    icon: Icons.cloud_upload,
+                    color: AppColors.info,
+                    onPressed: tracker.pendingUpdates == 0
+                        ? null
+                        : () async {
+                            await tracker.flushBatch();
+                            setState(() {});
+                          },
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),

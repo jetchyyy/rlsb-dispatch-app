@@ -33,13 +33,9 @@ class ApiClient {
           }
           return handler.next(options);
         },
-        onError: (error, handler) {
-          if (error.response?.statusCode == 401) {
-            prefs.remove(ApiConstants.tokenKey);
-            prefs.remove(ApiConstants.userKey);
-          }
-          return handler.next(error);
-        },
+        // Note: We don't remove tokens on 401 here.
+        // The IncidentProvider and other providers handle 401 errors
+        // and trigger proper logout through AuthProvider if needed.
       ),
     );
 

@@ -46,12 +46,8 @@ class ApiService {
         // ── Error Interceptor ────────────────────────────────
         onError: (DioException error, handler) async {
           if (error.response?.statusCode == 401) {
-            // Clear stored token
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.remove(ApiConstants.tokenKey);
-            await prefs.remove(ApiConstants.userKey);
-
-            // Trigger logout callback
+            // Trigger logout callback to handle auth cleanup properly
+            // Don't remove tokens here - let the logout flow handle it
             onUnauthorized?.call();
           }
           return handler.next(error);

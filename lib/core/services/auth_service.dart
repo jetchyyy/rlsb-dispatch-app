@@ -17,7 +17,7 @@ class AuthService {
   /// Returns [Responder] on success.
   Future<Responder> login(String email, String password) async {
     final response = await _api.post(
-      ApiConstants.login,
+      ApiConstants.loginEndpoint,
       data: {'email': email, 'password': password},
     );
 
@@ -62,7 +62,7 @@ class AuthService {
 
   Future<void> logout() async {
     try {
-      await _api.post(ApiConstants.logout);
+      await _api.post(ApiConstants.logoutEndpoint);
     } on DioException catch (_) {
       // Even if the API call fails, we still clear local data.
     }
@@ -81,7 +81,7 @@ class AuthService {
     if (token == null || token.isEmpty) return null;
 
     try {
-      final response = await _api.get(ApiConstants.profile);
+      final response = await _api.get(ApiConstants.profileEndpoint);
       final data = response.data as Map<String, dynamic>;
       final responder = Responder.fromJson(
         data['responder'] as Map<String, dynamic>? ?? data,
