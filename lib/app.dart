@@ -4,7 +4,10 @@ import 'package:provider/provider.dart';
 
 import 'core/constants/app_colors.dart';
 import 'core/providers/incident_provider.dart';
+import 'core/providers/location_tracking_provider.dart';
+import 'core/services/background_service_initializer.dart';
 import 'core/widgets/incident_alert_overlay.dart';
+import 'features/admin/screens/dispatcher_tracker_screen.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
@@ -25,14 +28,21 @@ class App extends StatefulWidget {
 class _AppState extends State<App> {
   List<Map<String, dynamic>>? _pendingAlertIncidents;
 
+  /// Track the last auth state so we can react to login/logout transitions.
+  bool _wasAuthenticated = false;
+
   @override
   void initState() {
     super.initState();
-    // Register the alarm callback after the first frame so providers are ready
+    // Register callbacks after the first frame so providers are ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerAlarmCallback();
+      _registerLocationCallbacks();
+      _listenToAuthChanges();
     });
   }
+
+  // ── Alarm ────────────────────────────────────────────────────
 
   void _registerAlarmCallback() {
     final incidentProvider = context.read<IncidentProvider>();
@@ -43,6 +53,67 @@ class _AppState extends State<App> {
         });
       }
     };
+  }
+
+  // ── Location Tracking ↔ Incident Actions ─────────────────────
+
+  void _registerLocationCallbacks() {
+    final incidentProvider = context.read<IncidentProvider>();
+    final locationProvider = context.read<LocationTrackingProvider>();
+
+    // When the responder taps "Respond" → switch to 5-second active tracking
+    incidentProvider.onRespondStarted = (incidentId) {
+      debugPrint('📍 App: Respond started → activating GPS for incident #$incidentId');
+      locationProvider.startActiveTracking(incidentId);
+      BackgroundServiceInitializer.setTrackingMode('active',
+          incidentId: incidentId);
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'Active tracking — responding to incident #$incidentId',
+      );
+    };
+
+    // When the incident is resolved → revert to 5-minute passive tracking
+    incidentProvider.onRespondEnded = () {
+      debugPrint('📍 App: Respond ended → reverting to passive GPS');
+      locationProvider.stopActiveTracking();
+      BackgroundServiceInitializer.setTrackingMode('passive');
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'Location tracking is active',
+      );
+    };
+  }
+
+  // ── Auth State Transitions ─────────────────────────────────
+
+  void _listenToAuthChanges() {
+    final authProvider = context.read<AuthProvider>();
+    _wasAuthenticated = authProvider.isAuthenticated;
+
+    authProvider.addListener(() {
+      if (!mounted) return;
+
+      final isNowAuthenticated = authProvider.isAuthenticated;
+
+      // Login transition: start passive tracking + background service
+      if (!_wasAuthenticated && isNowAuthenticated) {
+        debugPrint('📍 App: Login detected → starting passive GPS tracking');
+        final locationProvider = context.read<LocationTrackingProvider>();
+        locationProvider.startPassiveTracking();
+        BackgroundServiceInitializer.startService();
+      }
+
+      // Logout transition: stop everything
+      if (_wasAuthenticated && !isNowAuthenticated) {
+        debugPrint('📍 App: Logout detected → stopping all GPS tracking');
+        final locationProvider = context.read<LocationTrackingProvider>();
+        locationProvider.stopAllTracking();
+        BackgroundServiceInitializer.stopService();
+      }
+
+      _wasAuthenticated = isNowAuthenticated;
+    });
   }
 
   void _dismissAlert() {
@@ -164,6 +235,13 @@ class _AppState extends State<App> {
           path: '/profile',
           name: 'profile',
           builder: (context, state) => const ProfileScreen(),
+        ),
+
+        // ── Admin Tracker (hidden) ─────────────────────────────
+        GoRoute(
+          path: '/admin/tracker',
+          name: 'adminTracker',
+          builder: (context, state) => const DispatcherTrackerScreen(),
         ),
       ],
     );

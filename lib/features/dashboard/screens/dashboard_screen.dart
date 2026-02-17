@@ -37,7 +37,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       final auth = context.read<AuthProvider>();
       if (auth.isAuthenticated) {
         final provider = context.read<IncidentProvider>();
-        // Clear any existing filters to show all incidents
+        // Clear filters and fetch all incidents for stats calculation
         provider.clearFilters();
         provider.fetchIncidents();
         provider.fetchStatistics();
@@ -149,7 +149,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ),
         ),
-        floatingActionButton: _buildFAB(context),
       ),
     );
   }
@@ -359,16 +358,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               const SizedBox(width: 8),
               Expanded(
                 child: _ActionCard(
-                  icon: Icons.map_outlined,
-                  label: 'Live Map',
-                  subtitle: 'Track',
-                  color: const Color(0xFF06B6D4),
-                  onTap: () => context.push('/map'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _ActionCard(
                   icon: Icons.analytics_outlined,
                   label: 'Analytics',
                   subtitle: 'Reports',
@@ -533,7 +522,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 // Body
                 if (ip.isLoading && ip.incidents.isEmpty)
                   _buildLoadingShimmer()
-                else if (ip.incidents.isEmpty)
+                else if (ip.incidents.where((i) => 
+                    !['resolved', 'closed', 'cancelled']
+                        .contains((i['status'] ?? '').toString().toLowerCase())).isEmpty)
                   _buildEmptyState()
                 else
                   _buildIncidentList(ip),
@@ -583,7 +574,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               size: 40, color: Colors.grey.shade300),
           const SizedBox(height: 10),
           Text(
-            'No incidents',
+            'No active incidents',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -601,18 +592,23 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildIncidentList(IncidentProvider ip) {
-    final incidents = ip.incidents.take(5).toList();
+    // Filter to show only active incidents (exclude resolved, closed, cancelled)
+    final activeIncidents = ip.incidents.where((incident) {
+      final status = (incident['status'] ?? '').toString().toLowerCase();
+      return !['resolved', 'closed', 'cancelled'].contains(status);
+    }).take(5).toList();
+    
     return Column(
       children: [
-        for (int i = 0; i < incidents.length; i++) ...[
+        for (int i = 0; i < activeIncidents.length; i++) ...[
           _IncidentRow(
-            incident: incidents[i],
+            incident: activeIncidents[i],
             onTap: () {
-              final id = incidents[i]['id'];
+              final id = activeIncidents[i]['id'];
               if (id != null) context.push('/incidents/$id');
             },
           ),
-          if (i < incidents.length - 1)
+          if (i < activeIncidents.length - 1)
             Divider(
               height: 1,
               thickness: 1,
@@ -623,27 +619,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // FAB
-  // ═══════════════════════════════════════════════════════════
-
-  Widget _buildFAB(BuildContext context) {
-    return FloatingActionButton.extended(
-      onPressed: () {
-        HapticFeedback.mediumImpact();
-        context.push('/incidents/create');
-      },
-      icon: const Icon(Icons.add_rounded, size: 20),
-      label: const Text(
-        'Report',
-        style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.3),
-      ),
-      backgroundColor: AppColors.primary,
-      foregroundColor: Colors.white,
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-    );
-  }
 }
 
 // ═════════════════════════════════════════════════════════════

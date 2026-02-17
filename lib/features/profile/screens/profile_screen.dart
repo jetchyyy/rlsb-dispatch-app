@@ -5,8 +5,39 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  /// Counter for hidden admin mode unlock.
+  /// Tap "Roles" 10 times to reveal the dispatcher tracker.
+  int _adminTapCount = 0;
+
+  static const int _adminUnlockTaps = 10;
+
+  void _onRolesTapped(BuildContext context) {
+    setState(() {
+      _adminTapCount++;
+    });
+
+    if (_adminTapCount >= _adminUnlockTaps) {
+      _adminTapCount = 0; // Reset counter
+      context.push('/admin/tracker');
+    } else if (_adminTapCount >= 5) {
+      // Hint after 5 taps
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_adminUnlockTaps - _adminTapCount} more taps...'),
+          duration: const Duration(milliseconds: 800),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,8 +81,12 @@ class ProfileScreen extends StatelessWidget {
             _infoTile(Icons.business, 'Division', user?.division ?? 'N/A'),
             _infoTile(Icons.work, 'Position', user?.position ?? 'N/A'),
             _infoTile(Icons.phone, 'Phone', user?.phoneNumber ?? 'N/A'),
-            _infoTile(Icons.security, 'Roles',
-                user?.roles.join(', ') ?? 'N/A'),
+            // Tappable Roles tile for hidden admin mode
+            GestureDetector(
+              onTap: () => _onRolesTapped(context),
+              child: _infoTile(Icons.security, 'Roles',
+                  user?.roles.join(', ') ?? 'N/A'),
+            ),
             const SizedBox(height: 32),
 
             // ── Logout ─────────────────────────────────────

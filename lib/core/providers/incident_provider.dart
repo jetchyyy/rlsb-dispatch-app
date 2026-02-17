@@ -41,6 +41,15 @@ class IncidentProvider extends ChangeNotifier {
   // Auto-refresh
   Timer? _refreshTimer;
 
+  // ── Location Tracking Callbacks ─────────────────────────────
+  /// Called when the responder taps "Respond" on an incident.
+  /// Passes the incident ID to start active GPS tracking.
+  void Function(int incidentId)? onRespondStarted;
+
+  /// Called when the incident is resolved.
+  /// Signals the tracking system to revert to passive mode.
+  VoidCallback? onRespondEnded;
+
   // ── Getters ────────────────────────────────────────────────
 
   List<Map<String, dynamic>> get incidents => _incidents;
@@ -492,8 +501,13 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   Future<bool> respondToIncident(int id, {String? notes}) async {
-    return _performAction(
+    final success = await _performAction(
         id, 'respond', ApiConstants.incidentRespond(id), notes);
+    if (success) {
+      debugPrint('📍 Respond succeeded — triggering active GPS tracking for incident #$id');
+      onRespondStarted?.call(id);
+    }
+    return success;
   }
 
   Future<bool> markOnScene(int id, {String? notes}) async {
@@ -502,8 +516,13 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   Future<bool> resolveIncident(int id, {String? notes}) async {
-    return _performAction(
+    final success = await _performAction(
         id, 'resolve', ApiConstants.incidentResolve(id), notes);
+    if (success) {
+      debugPrint('📍 Resolve succeeded — reverting to passive GPS tracking');
+      onRespondEnded?.call();
+    }
+    return success;
   }
 
   Future<bool> closeIncident(int id, {String? notes}) async {
