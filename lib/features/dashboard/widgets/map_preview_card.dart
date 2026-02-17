@@ -223,9 +223,9 @@ class _MapPreviewCardState extends State<MapPreviewCard>
           },
           child: Material(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(4),
             clipBehavior: Clip.antiAlias,
-            elevation: _isPressed ? 2 : 4,
+            elevation: _isPressed ? 1 : 2,
             shadowColor: Colors.black.withOpacity(0.15),
             child: _buildMapContent(markers),
           ),
@@ -309,7 +309,7 @@ class _MapPreviewCardState extends State<MapPreviewCard>
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
@@ -337,7 +337,7 @@ class _MapPreviewCardState extends State<MapPreviewCard>
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFF06B6D4).withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(4),
                       boxShadow: [
                         BoxShadow(
                           color: const Color(0xFF06B6D4).withValues(alpha: 0.3),
@@ -366,7 +366,7 @@ class _MapPreviewCardState extends State<MapPreviewCard>
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 color: Colors.black.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(4),
               ),
               child: const Icon(
                 Icons.open_in_new_rounded,

@@ -64,7 +64,18 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
     final ip = context.watch<IncidentProvider>();
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              context.go('/dashboard');
+            }
+          },
+        ),
         title: const Text('All Incidents'),
         actions: [
           IconButton(
@@ -81,68 +92,195 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
       ),
       body: Column(
         children: [
-          // ── Search Bar ─────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
-              decoration: InputDecoration(
-                hintText: 'Search incidents...',
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: Colors.grey.shade100,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+          // ── Content Header ──────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECF0F5),
+              border: Border(
+                bottom: BorderSide(color: Colors.grey.shade300, width: 1),
               ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.list_alt,
+                    size: 20, color: AppColors.textSecondary),
+                const SizedBox(width: 8),
+                const Text(
+                  'Incident Management',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${ip.totalCount} total',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 
-          // ── Filters ────────────────────────────────────
-          _FiltersRow(
-            onFilterChanged: () => ip.fetchIncidents(),
+          // ── Search & Filters Box ───────────────────────
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              children: [
+                // Box header
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    border: Border(
+                      bottom: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(4)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.filter_list,
+                          size: 16, color: Colors.grey.shade600),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Search & Filters',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey.shade700,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (ip.statusFilter != null ||
+                          ip.severityFilter != null ||
+                          ip.typeFilter != null)
+                        GestureDetector(
+                          onTap: () {
+                            ip.clearFilters();
+                            ip.fetchIncidents();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppColors.error.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(
+                                  color: AppColors.error.withOpacity(0.3)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.clear_all,
+                                    size: 14, color: AppColors.error),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Clear All',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.error,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Search input
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: _onSearchChanged,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Search incidents...',
+                      hintStyle:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                      prefixIcon: Icon(Icons.search,
+                          size: 18, color: Colors.grey.shade500),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 16),
+                              onPressed: () {
+                                _searchController.clear();
+                                _onSearchChanged('');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 0, horizontal: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(4),
+                        borderSide: const BorderSide(
+                            color: AppColors.primary, width: 1.5),
+                      ),
+                    ),
+                  ),
+                ),
+                // Filter buttons
+                _FiltersRow(onFilterChanged: () => ip.fetchIncidents()),
+              ],
+            ),
           ),
 
           // ── Active Filter Summary ──────────────────────
           if (ip.statusFilter != null ||
               ip.severityFilter != null ||
-              ip.typeFilter != null) ...[
+              ip.typeFilter != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               child: Row(
                 children: [
+                  Icon(Icons.info_outline,
+                      size: 14, color: Colors.grey.shade500),
+                  const SizedBox(width: 6),
                   Text(
-                    '${ip.totalCount} results',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () {
-                      ip.clearFilters();
-                      ip.fetchIncidents();
-                    },
-                    icon: const Icon(Icons.clear_all, size: 16),
-                    label: const Text('Clear filters',
-                        style: TextStyle(fontSize: 12)),
+                    '${ip.totalCount} results found',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
             ),
-          ],
 
           // ── Incident List ──────────────────────────────
           Expanded(
@@ -167,24 +305,82 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
                           Expanded(
                             child: RefreshIndicator(
                               onRefresh: () => ip.fetchIncidents(),
-                              child: ListView.builder(
-                                controller: _scrollController,
-                                padding:
-                                    const EdgeInsets.only(bottom: 16, top: 8),
-                                itemCount: ip.incidents.length,
-                                itemBuilder: (context, index) {
-                                  final incident = ip.incidents[index];
-                                  return _AnimatedIncidentCard(
-                                    key: ValueKey(incident['id']),
-                                    index: index,
-                                    incident: incident,
-                                    onTap: () {
-                                      final id = incident['id'];
-                                      if (id != null)
-                                        context.push('/incidents/$id');
-                                    },
-                                  );
-                                },
+                              child: Container(
+                                margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border:
+                                      Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: Column(
+                                  children: [
+                                    // Table header
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primary,
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                                top: Radius.circular(3)),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                              Icons.warning_amber_rounded,
+                                              size: 16,
+                                              color: Colors.white),
+                                          const SizedBox(width: 6),
+                                          const Text(
+                                            'Incidents',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          if (ip.isLoading)
+                                            const SizedBox(
+                                              width: 14,
+                                              height: 14,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    // List items
+                                    Expanded(
+                                      child: ListView.separated(
+                                        controller: _scrollController,
+                                        padding: EdgeInsets.zero,
+                                        itemCount: ip.incidents.length,
+                                        separatorBuilder: (_, __) => Divider(
+                                          height: 1,
+                                          thickness: 1,
+                                          color: Colors.grey.shade200,
+                                        ),
+                                        itemBuilder: (context, index) {
+                                          final incident = ip.incidents[index];
+                                          return _IncidentRow(
+                                            key: ValueKey(incident['id']),
+                                            incident: incident,
+                                            onTap: () {
+                                              final id = incident['id'];
+                                              if (id != null)
+                                                context.push('/incidents/$id');
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -240,110 +436,96 @@ class _FiltersRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ip = context.watch<IncidentProvider>();
 
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      child: Row(
         children: [
-          _filterChip(
-            context: context,
-            label: ip.statusFilter != null
-                ? ip.statusFilter!.replaceAll('_', ' ')
-                : 'Status',
-            isActive: ip.statusFilter != null,
-            options: _statuses,
-            current: ip.statusFilter,
-            onSelected: (value) {
-              ip.setFilters(
-                status: value,
-                severity: ip.severityFilter,
-                type: ip.typeFilter,
-                municipality: ip.municipalityFilter,
-                search: ip.searchQuery,
-              );
-              onFilterChanged();
-            },
+          Expanded(
+            child: _filterButton(
+              context: context,
+              label: ip.statusFilter != null
+                  ? ip.statusFilter!.replaceAll('_', ' ')
+                  : 'Status',
+              isActive: ip.statusFilter != null,
+              icon: Icons.flag_outlined,
+              options: _statuses,
+              current: ip.statusFilter,
+              onSelected: (value) {
+                ip.setFilters(
+                  status: value,
+                  severity: ip.severityFilter,
+                  type: ip.typeFilter,
+                  municipality: ip.municipalityFilter,
+                  search: ip.searchQuery,
+                );
+                onFilterChanged();
+              },
+            ),
           ),
-          const SizedBox(width: 8),
-          _filterChip(
-            context: context,
-            label: ip.severityFilter ?? 'Severity',
-            isActive: ip.severityFilter != null,
-            options: _severities,
-            current: ip.severityFilter,
-            onSelected: (value) {
-              ip.setFilters(
-                status: ip.statusFilter,
-                severity: value,
-                type: ip.typeFilter,
-                municipality: ip.municipalityFilter,
-                search: ip.searchQuery,
-              );
-              onFilterChanged();
-            },
+          const SizedBox(width: 6),
+          Expanded(
+            child: _filterButton(
+              context: context,
+              label: ip.severityFilter ?? 'Severity',
+              isActive: ip.severityFilter != null,
+              icon: Icons.warning_amber_rounded,
+              options: _severities,
+              current: ip.severityFilter,
+              onSelected: (value) {
+                ip.setFilters(
+                  status: ip.statusFilter,
+                  severity: value,
+                  type: ip.typeFilter,
+                  municipality: ip.municipalityFilter,
+                  search: ip.searchQuery,
+                );
+                onFilterChanged();
+              },
+            ),
           ),
-          const SizedBox(width: 8),
-          _filterChip(
-            context: context,
-            label: ip.typeFilter != null
-                ? ip.typeFilter!.replaceAll('_', ' ')
-                : 'Type',
-            isActive: ip.typeFilter != null,
-            options: _types,
-            current: ip.typeFilter,
-            onSelected: (value) {
-              ip.setFilters(
-                status: ip.statusFilter,
-                severity: ip.severityFilter,
-                type: value,
-                municipality: ip.municipalityFilter,
-                search: ip.searchQuery,
-              );
-              onFilterChanged();
-            },
+          const SizedBox(width: 6),
+          Expanded(
+            child: _filterButton(
+              context: context,
+              label: ip.typeFilter != null
+                  ? ip.typeFilter!.replaceAll('_', ' ')
+                  : 'Type',
+              isActive: ip.typeFilter != null,
+              icon: Icons.category_outlined,
+              options: _types,
+              current: ip.typeFilter,
+              onSelected: (value) {
+                ip.setFilters(
+                  status: ip.statusFilter,
+                  severity: ip.severityFilter,
+                  type: value,
+                  municipality: ip.municipalityFilter,
+                  search: ip.searchQuery,
+                );
+                onFilterChanged();
+              },
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _filterChip({
+  Widget _filterButton({
     required BuildContext context,
     required String label,
     required bool isActive,
+    required IconData icon,
     required List<String> options,
     required String? current,
     required ValueChanged<String?> onSelected,
   }) {
-    return ActionChip(
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: isActive ? Colors.white : AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Icon(
-            Icons.arrow_drop_down,
-            size: 16,
-            color: isActive ? Colors.white : AppColors.textSecondary,
-          ),
-        ],
-      ),
-      backgroundColor: isActive ? AppColors.primary : Colors.grey.shade100,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      side: BorderSide.none,
-      onPressed: () {
+    return InkWell(
+      onTap: () {
         showModalBottomSheet(
           context: context,
           shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
           ),
           builder: (_) => _FilterBottomSheet(
             title: label,
@@ -353,6 +535,46 @@ class _FiltersRow extends StatelessWidget {
           ),
         );
       },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary : Colors.white,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: isActive ? AppColors.primary : Colors.grey.shade400,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: isActive ? Colors.white : Colors.grey.shade600,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: isActive ? Colors.white : Colors.grey.shade700,
+                  letterSpacing: 0.3,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 16,
+              color: isActive ? Colors.white : Colors.grey.shade600,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -425,149 +647,29 @@ class _FilterBottomSheet extends StatelessWidget {
   }
 }
 
-// ─── Animated Incident Card Wrapper ──────────────────────────
+// ─── Incident Row (AdminLTE flat style) ──────────────────────
 
-class _AnimatedIncidentCard extends StatefulWidget {
-  final int index;
+class _IncidentRow extends StatelessWidget {
   final Map<String, dynamic> incident;
   final VoidCallback onTap;
 
-  const _AnimatedIncidentCard({
-    super.key,
-    required this.index,
-    required this.incident,
-    required this.onTap,
-  });
-
-  @override
-  State<_AnimatedIncidentCard> createState() => _AnimatedIncidentCardState();
-}
-
-class _AnimatedIncidentCardState extends State<_AnimatedIncidentCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 400 + (widget.index * 50).clamp(0, 300)),
-    );
-
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 1.0, curve: Curves.easeOut),
-      ),
-    );
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.0, 0.3),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 1.0, curve: Curves.easeOutCubic),
-      ),
-    );
-
-    // Start animation
-    Future.delayed(Duration(milliseconds: widget.index * 30), () {
-      if (mounted) _controller.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  const _IncidentRow({super.key, required this.incident, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _fadeAnimation,
-      child: SlideTransition(
-        position: _slideAnimation,
-        child: _IncidentListCard(
-          incident: widget.incident,
-          onTap: widget.onTap,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Incident List Card ──────────────────────────────────────
-
-class _IncidentListCard extends StatefulWidget {
-  final Map<String, dynamic> incident;
-  final VoidCallback onTap;
-
-  const _IncidentListCard({required this.incident, required this.onTap});
-
-  @override
-  State<_IncidentListCard> createState() => _IncidentListCardState();
-}
-
-class _IncidentListCardState extends State<_IncidentListCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _scaleAnimation;
-  bool _isPressed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 150),
-    );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.97).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _handleTapDown(TapDownDetails details) {
-    setState(() => _isPressed = true);
-    _controller.forward();
-  }
-
-  void _handleTapUp(TapUpDetails details) {
-    setState(() => _isPressed = false);
-    _controller.reverse();
-  }
-
-  void _handleTapCancel() {
-    setState(() => _isPressed = false);
-    _controller.reverse();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final type = (widget.incident['incident_type'] ??
-        widget.incident['type'] ??
-        'Unknown') as String;
-    final status = (widget.incident['status'] ?? 'unknown') as String;
-    final severity = (widget.incident['severity'] ?? '') as String;
-    final title = (widget.incident['incident_title'] ??
-        widget.incident['title'] ??
+    final type =
+        (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
+    final status = (incident['status'] ?? 'unknown') as String;
+    final severity = (incident['severity'] ?? '') as String;
+    final title = (incident['incident_title'] ??
+        incident['title'] ??
         type.replaceAll('_', ' ')) as String;
-    final description = (widget.incident['description'] ?? '') as String;
-    final incNumber = widget.incident['incident_number'] as String? ??
-        '#${widget.incident['id']}';
-    final municipality = widget.incident['municipality'] as String?;
-    final reportedAt = widget.incident['reported_at'] as String? ??
-        widget.incident['created_at'] as String?;
+    final description = (incident['description'] ?? '') as String;
+    final incNumber =
+        incident['incident_number'] as String? ?? '#${incident['id']}';
+    final municipality = incident['municipality'] as String?;
+    final reportedAt =
+        incident['reported_at'] as String? ?? incident['created_at'] as String?;
 
     final sevColor = AppColors.incidentSeverityColor(severity);
     final statColor = AppColors.incidentStatusColor(status);
@@ -581,278 +683,179 @@ class _IncidentListCardState extends State<_IncidentListCard>
       }
     }
 
-    return ScaleTransition(
-      scale: _scaleAnimation,
-      child: GestureDetector(
-        onTapDown: _handleTapDown,
-        onTapUp: (details) {
-          _handleTapUp(details);
-          widget.onTap();
-        },
-        onTapCancel: _handleTapCancel,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: _isPressed
-                    ? Colors.black.withOpacity(0.08)
-                    : Colors.black.withOpacity(0.04),
-                blurRadius: _isPressed ? 8 : 12,
-                offset: Offset(0, _isPressed ? 2 : 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: IntrinsicHeight(
-              child: Row(
-                children: [
-                  // Severity accent bar with gradient
-                  Container(
-                    width: 6,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          sevColor,
-                          sevColor.withOpacity(0.6),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Top row: Icon, number, and time
-                          Row(
-                            children: [
-                              // Type icon with animated background
-                              Hero(
-                                tag: 'incident_${widget.incident['id']}_icon',
-                                child: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        sevColor.withOpacity(0.15),
-                                        sevColor.withOpacity(0.08),
-                                      ],
-                                    ),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    _typeIcon(type),
-                                    size: 20,
-                                    color: sevColor,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      incNumber,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        fontFamily: 'monospace',
-                                        color: Colors.grey.shade700,
-                                        letterSpacing: 0.5,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _formatType(type),
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey.shade500,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (timeStr.isNotEmpty)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.access_time_rounded,
-                                        size: 12,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        timeStr,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
+    return InkWell(
+      onTap: onTap,
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            // Severity accent bar
+            Container(
+              width: 4,
+              color: sevColor,
+            ),
+            // Content
+            Expanded(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Top row: number, type, time
+                    Row(
+                      children: [
+                        Icon(_typeIcon(type), size: 16, color: sevColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          incNumber,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                            color: Colors.grey.shade700,
                           ),
-                          const SizedBox(height: 12),
-
-                          // Title with better typography
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatType(type),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (timeStr.isNotEmpty)
                           Text(
-                            title,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF1E293B),
-                              letterSpacing: -0.3,
-                              height: 1.2,
+                            timeStr,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade500,
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                           ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
 
-                          if (description.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              description,
+                    // Title
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                        height: 1.3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                          height: 1.3,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+
+                    const SizedBox(height: 6),
+
+                    // Bottom row: location, status, severity badges
+                    Row(
+                      children: [
+                        if (municipality != null &&
+                            municipality.isNotEmpty) ...[
+                          Icon(Icons.location_on_rounded,
+                              size: 12, color: Colors.grey.shade400),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              municipality,
                               style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                                height: 1.4,
+                                fontSize: 11,
+                                color: Colors.grey.shade500,
                               ),
-                              maxLines: 2,
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ],
-
-                          const SizedBox(height: 12),
-
-                          // Bottom row: Location and status badges
-                          Row(
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        // Status badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: statColor.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(
+                                color: statColor.withOpacity(0.4), width: 1),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (municipality != null &&
-                                  municipality.isNotEmpty) ...[
-                                Icon(
-                                  Icons.location_on_rounded,
-                                  size: 14,
-                                  color: Colors.grey.shade400,
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
-                                    municipality,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade500,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                              ],
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
+                                width: 6,
+                                height: 6,
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      statColor.withOpacity(0.15),
-                                      statColor.withOpacity(0.08),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: statColor.withOpacity(0.3),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: BoxDecoration(
-                                        color: statColor,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      status.replaceAll('_', ' ').toUpperCase(),
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        color: statColor,
-                                        letterSpacing: 0.8,
-                                      ),
-                                    ),
-                                  ],
+                                  color: statColor,
+                                  shape: BoxShape.circle,
                                 ),
                               ),
-                              if (severity.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: sevColor.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    severity.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: sevColor,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
+                              const SizedBox(width: 4),
+                              Text(
+                                status.replaceAll('_', ' ').toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  color: statColor,
+                                  letterSpacing: 0.5,
                                 ),
-                              ],
+                              ),
                             ],
                           ),
+                        ),
+                        if (severity.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: sevColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: Text(
+                              severity.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: sevColor,
+                              ),
+                            ),
+                          ),
                         ],
-                      ),
+                      ],
                     ),
-                  ),
-                  // Chevron indicator
-                  Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: Icon(
-                      Icons.chevron_right_rounded,
-                      size: 24,
-                      color: Colors.grey.shade300,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+            // Chevron
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: Colors.grey.shade400,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -911,12 +914,12 @@ class _ModernPagination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Colors.grey.shade200, width: 1),
-        ),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -924,7 +927,7 @@ class _ModernPagination extends StatelessWidget {
           // Previous button
           _PaginationButton(
             icon: Icons.chevron_left_rounded,
-            label: 'Previous',
+            label: 'Prev',
             onPressed: currentPage > 1 && !isLoading
                 ? () => onPageChanged(currentPage - 1)
                 : null,
@@ -935,8 +938,8 @@ class _ModernPagination extends StatelessWidget {
             child: Center(
               child: isLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : _buildPageNumbers(),
@@ -1047,32 +1050,39 @@ class _PaginationButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isEnabled = onPressed != null;
 
-    return TextButton.icon(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: isEnabled ? AppColors.primary : Colors.grey.shade400,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: const Size(80, 36),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-      icon: isNext ? const SizedBox.shrink() : Icon(icon, size: 18),
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isEnabled ? Colors.white : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: isEnabled ? Colors.grey.shade400 : Colors.grey.shade300,
           ),
-          if (isNext) ...[
-            const SizedBox(width: 4),
-            Icon(icon, size: 18),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isNext)
+              Icon(icon,
+                  size: 16,
+                  color: isEnabled ? AppColors.primary : Colors.grey.shade400),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isEnabled ? AppColors.primary : Colors.grey.shade400,
+              ),
+            ),
+            if (isNext)
+              Icon(icon,
+                  size: 16,
+                  color: isEnabled ? AppColors.primary : Colors.grey.shade400),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1096,11 +1106,11 @@ class _PageNumber extends StatelessWidget {
     return GestureDetector(
       onTap: isActive ? null : onPressed,
       child: Container(
-        width: 36,
-        height: 36,
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
           color: isActive ? AppColors.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
           border: Border.all(
             color: isActive ? AppColors.primary : Colors.grey.shade300,
             width: 1,
@@ -1110,7 +1120,7 @@ class _PageNumber extends StatelessWidget {
           child: Text(
             '$pageNumber',
             style: TextStyle(
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               color: isActive ? Colors.white : Colors.grey.shade700,
             ),

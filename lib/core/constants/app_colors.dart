@@ -4,7 +4,7 @@ class AppColors {
   AppColors._();
 
   // Primary Colors
-  static const Color primary = Color(0xFF1565C0);
+  static const Color primary = Color(0xFF1e3a8a);
   static const Color primaryDark = Color(0xFF0D47A1);
   static const Color primaryLight = Color(0xFF42A5F5);
 
@@ -26,23 +26,23 @@ class AppColors {
 
   // ── Incident Severity Colors ────────────────────────────
   static const Color severityCritical = Color(0xFFDC2626); // red-600
-  static const Color severityHigh = Color(0xFFEA580C);     // orange-600
-  static const Color severityMedium = Color(0xFFFBBF24);   // yellow-400
-  static const Color severityLow = Color(0xFF10B981);      // green-500
+  static const Color severityHigh = Color(0xFFEA580C); // orange-600
+  static const Color severityMedium = Color(0xFFFBBF24); // yellow-400
+  static const Color severityLow = Color(0xFF10B981); // green-500
 
   // ── Incident Status Colors ──────────────────────────────
-  static const Color statusReported = Color(0xFF3B82F6);     // blue-500
+  static const Color statusReported = Color(0xFF3B82F6); // blue-500
   static const Color statusAcknowledged = Color(0xFF8B5CF6); // purple-500
-  static const Color statusResponding = Color(0xFFF59E0B);   // amber-500
-  static const Color statusOnScene = Color(0xFF06B6D4);      // cyan-500
-  static const Color statusResolved = Color(0xFF10B981);     // green-500
-  static const Color statusClosed = Color(0xFF6B7280);       // gray-500
-  static const Color statusCancelled = Color(0xFF9CA3AF);    // gray-400
+  static const Color statusResponding = Color(0xFFF59E0B); // amber-500
+  static const Color statusOnScene = Color(0xFF06B6D4); // cyan-500
+  static const Color statusResolved = Color(0xFF10B981); // green-500
+  static const Color statusClosed = Color(0xFF6B7280); // gray-500
+  static const Color statusCancelled = Color(0xFF9CA3AF); // gray-400
 
   // Legacy severity colors (injury mapping)
-  static const Color severityMinor = Color(0xFF4CAF50);     // Green
-  static const Color severityModerate = Color(0xFFFFEB3B);   // Yellow
-  static const Color severitySevere = Color(0xFFF44336);     // Red
+  static const Color severityMinor = Color(0xFF4CAF50); // Green
+  static const Color severityModerate = Color(0xFFFFEB3B); // Yellow
+  static const Color severitySevere = Color(0xFFF44336); // Red
 
   // Triage Colors
   static const Color triageGreen = Color(0xFF4CAF50);

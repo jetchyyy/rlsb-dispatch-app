@@ -66,7 +66,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         statusBarIconBrightness: Brightness.light,
       ),
       child: Scaffold(
-        backgroundColor: const Color(0xFFF1F5F9),
+        backgroundColor: const Color(0xFFF4F6F9),
         body: RefreshIndicator(
           onRefresh: () async {
             HapticFeedback.mediumImpact();
@@ -102,7 +102,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                         const SizedBox(height: 28),
 
                         // Quick actions
-                        _buildQuickActions(context, ip),
+                        _buildQuickActions(context),
+
+                        const SizedBox(height: 20),
+
+                        // Map preview (full width)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: MapPreviewCard(
+                            incidents: ip.incidents,
+                            onTap: () => context.push('/map'),
+                          ),
+                        ),
 
                         // Error banner
                         if (ip.errorMessage != null) ...[
@@ -157,15 +168,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       surfaceTintColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF0D47A1),
-                Color(0xFF1565C0),
-                Color(0xFF1976D2),
-              ],
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            image: DecorationImage(
+              image: const AssetImage('assets/images/header.jpg'),
+              fit: BoxFit.cover,
+              colorFilter: ColorFilter.mode(
+                AppColors.primary.withOpacity(0.8),
+                BlendMode.srcATop,
+              ),
             ),
           ),
           child: SafeArea(
@@ -326,22 +337,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   // QUICK ACTIONS
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildQuickActions(BuildContext context, IncidentProvider ip) {
+  Widget _buildQuickActions(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'QUICK ACTIONS',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.2,
-              color: Colors.grey.shade500,
-            ),
-          ),
-          const SizedBox(height: 12),
+          _boxSectionHeader('QUICK ACTIONS', Icons.flash_on),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -353,7 +356,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onTap: () => context.push('/incidents'),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ActionCard(
+                  icon: Icons.map_outlined,
+                  label: 'Live Map',
+                  subtitle: 'Track',
+                  color: const Color(0xFF06B6D4),
+                  onTap: () => context.push('/map'),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: _ActionCard(
                   icon: Icons.analytics_outlined,
@@ -364,12 +377,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          // Map preview (full width)
-          MapPreviewCard(
-            incidents: ip.incidents,
-            onTap: () => context.push('/map'),
           ),
         ],
       ),
@@ -387,7 +394,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: const Color(0xFFFEF2F2),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(4),
           border: Border.all(color: const Color(0xFFFECACA)),
         ),
         child: Row(
@@ -415,7 +422,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: const Color(0xFFDC2626).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 child: const Text(
                   'Retry',
@@ -437,69 +444,127 @@ class _DashboardScreenState extends State<DashboardScreen>
   // RECENT INCIDENTS
   // ═══════════════════════════════════════════════════════════
 
+  // Helper for section headers
+  Widget _boxSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: Colors.grey.shade500),
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.2,
+            color: Colors.grey.shade500,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildRecentIncidents(BuildContext context, IncidentProvider ip) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'ACTIVE INCIDENTS',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
-                  color: Colors.grey.shade500,
-                ),
-              ),
-              if (ip.incidents.isNotEmpty)
-                GestureDetector(
-                  onTap: () => context.push('/incidents'),
-                  child: const Text(
-                    'View all',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primary,
-                    ),
+          // Content inside a bordered panel
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              children: [
+                // Panel header
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    border:
+                        Border(bottom: BorderSide(color: Colors.grey.shade300)),
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(3)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.access_time,
+                              size: 14, color: Colors.grey.shade600),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Recent Incidents',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (ip.incidents.isNotEmpty)
+                        GestureDetector(
+                          onTap: () => context.push('/incidents'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'View All',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-            ],
+                // Body
+                if (ip.isLoading && ip.incidents.isEmpty)
+                  _buildLoadingShimmer()
+                else if (ip.incidents.isEmpty)
+                  _buildEmptyState()
+                else
+                  _buildIncidentList(ip),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-
-          // Content
-          if (ip.isLoading && ip.incidents.isEmpty)
-            _buildLoadingShimmer()
-          else if (ip.incidents.isEmpty)
-            _buildEmptyState()
-          else
-            _buildIncidentList(ip),
         ],
       ),
     );
   }
 
   Widget _buildLoadingShimmer() {
-    return Column(
-      children: List.generate(
-        3,
-        (i) => Padding(
-          padding: EdgeInsets.only(bottom: i < 2 ? 8 : 0),
-          child: Container(
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: List.generate(
+          3,
+          (i) => Padding(
+            padding: EdgeInsets.only(bottom: i < 2 ? 8 : 0),
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             ),
           ),
@@ -510,21 +575,17 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildEmptyState() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 40),
+      padding: const EdgeInsets.symmetric(vertical: 32),
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: Column(
         children: [
           Icon(Icons.check_circle_outline_rounded,
-              size: 48, color: Colors.grey.shade300),
-          const SizedBox(height: 12),
+              size: 40, color: Colors.grey.shade300),
+          const SizedBox(height: 10),
           Text(
             'No incidents',
             style: TextStyle(
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: FontWeight.w600,
               color: Colors.grey.shade400,
             ),
@@ -540,48 +601,25 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildIncidentList(IncidentProvider ip) {
-    // Filter out resolved/closed/cancelled incidents
-    final activeIncidents = ip.incidents
-        .where((incident) {
-          final status = (incident['status'] ?? '').toString().toLowerCase();
-          return !['resolved', 'closed', 'cancelled'].contains(status);
-        })
-        .take(5)
-        .toList();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+    final incidents = ip.incidents.take(5).toList();
+    return Column(
+      children: [
+        for (int i = 0; i < incidents.length; i++) ...[
+          _IncidentRow(
+            incident: incidents[i],
+            onTap: () {
+              final id = incidents[i]['id'];
+              if (id != null) context.push('/incidents/$id');
+            },
           ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (int i = 0; i < activeIncidents.length; i++) ...[
-            _IncidentRow(
-              incident: activeIncidents[i],
-              onTap: () {
-                final id = activeIncidents[i]['id'];
-                if (id != null) context.push('/incidents/$id');
-              },
+          if (i < incidents.length - 1)
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: Colors.grey.shade200,
             ),
-            if (i < activeIncidents.length - 1)
-              Divider(
-                height: 1,
-                thickness: 1,
-                color: Colors.grey.shade100,
-                indent: 54,
-              ),
-          ],
         ],
-      ),
+      ],
     );
   }
 
@@ -602,8 +640,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       ),
       backgroundColor: AppColors.primary,
       foregroundColor: Colors.white,
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
     );
   }
 }
@@ -669,83 +707,67 @@ class _StatTileState extends State<_StatTile>
     return AnimatedBuilder(
       animation: _pulse,
       builder: (context, child) {
-        final glow = widget.pulse ? _pulse.value * 0.08 : 0.0;
+        // AdminLTE Small-Box Style
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: widget.pulse
-                    ? widget.color.withOpacity(0.08 + glow)
-                    : Colors.black.withOpacity(0.03),
-                blurRadius: widget.pulse ? 12 : 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            color: widget.color,
+            borderRadius: BorderRadius.circular(4),
           ),
-          child: Column(
+          child: Stack(
             children: [
-              // Icon
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: widget.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+              // Watermark Icon
+              Positioned(
+                right: -8,
+                bottom: -8,
+                child: Icon(
+                  widget.icon,
+                  size: 64,
+                  color: Colors.white.withOpacity(0.15),
                 ),
-                child: Icon(widget.icon, color: widget.color, size: 16),
               ),
-              const SizedBox(height: 8),
-
-              // Value
-              widget.isLoading
-                  ? SizedBox(
-                      height: 14,
-                      width: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        color: widget.color,
-                      ),
-                    )
-                  : Text(
-                      '${widget.value}',
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Value
+                    widget.isLoading
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            '${widget.value}',
+                            style: const TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              height: 1,
+                            ),
+                          ),
+                    const SizedBox(height: 4),
+                    // Label
+                    Text(
+                      widget.label.toUpperCase(),
                       style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: widget.color,
-                        height: 1,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withOpacity(0.9),
+                        letterSpacing: 0.5,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-              const SizedBox(height: 4),
-
-              // Label
-              Text(
-                widget.label,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade500,
-                  letterSpacing: 0.3,
+                  ],
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-
-              // Pulse dot
-              if (widget.pulse) ...[
-                const SizedBox(height: 4),
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: widget.color.withOpacity(0.5 + glow * 4),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ],
             ],
           ),
         );
@@ -777,7 +799,7 @@ class _ActionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(4),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
@@ -787,41 +809,57 @@ class _ActionCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.grey.shade300),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             children: [
+              // Left color accent bar
               Container(
-                width: 40,
-                height: 40,
+                width: 4,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Icon(icon, color: color, size: 20),
+                child: Icon(icon, color: color, size: 18),
               ),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF1E293B),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade400,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 1),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade400,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
+              Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
             ],
           ),
         ),
@@ -882,7 +920,7 @@ class _IncidentRow extends StatelessWidget {
               height: 38,
               decoration: BoxDecoration(
                 color: sevColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(4),
               ),
               child: Icon(_typeIcon(type), color: sevColor, size: 18),
             ),

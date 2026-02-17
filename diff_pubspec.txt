@@ -1,0 +1,14 @@
+﻿diff --git a/pubspec.yaml b/pubspec.yaml
+index ee6b824..d294f90 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -79,4 +79,8 @@ flutter:
+   assets:
+     - assets/images/body_front.png
+     - assets/images/body_back.png
++    - assets/images/header.jpg
++    - assets/images/hero1.png
++    - assets/images/pdrrmologo.png
++    - assets/images/pdrrmologo.png
+     - assets/sounds/alarm.wav
+\ No newline at end of file

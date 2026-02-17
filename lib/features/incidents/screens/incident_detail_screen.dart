@@ -25,7 +25,8 @@ class IncidentDetailScreen extends StatefulWidget {
 class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   final _notesController = TextEditingController();
   bool _showNotes = false;
-  bool _hasShownInjuryMapper = false; // Track if we've already opened the injury mapper
+  bool _hasShownInjuryMapper =
+      false; // Track if we've already opened the injury mapper
 
   // Status workflow: current status → next status
   static const _nextStatus = {
@@ -56,14 +57,14 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       context.read<IncidentProvider>().fetchIncident(widget.incidentId);
     });
   }
-  
+
   void _checkAndOpenInjuryMapper(Map<String, dynamic>? incident) {
     if (incident == null || _hasShownInjuryMapper) return;
-    
+
     final status = incident['status'] as String?;
     if (status == 'on_scene') {
       _hasShownInjuryMapper = true;
-      
+
       // Delay to ensure the detail screen is fully built
       Future.delayed(const Duration(milliseconds: 500), () {
         if (!mounted) return;
@@ -101,6 +102,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     }
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
         title: Text(incident?['incident_number'] ?? 'Incident Detail'),
         actions: [
@@ -117,9 +119,11 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline, size: 56, color: AppColors.error),
+                      const Icon(Icons.error_outline,
+                          size: 56, color: AppColors.error),
                       const SizedBox(height: 12),
-                      Text(ip.errorMessage!, style: const TextStyle(color: AppColors.error)),
+                      Text(ip.errorMessage!,
+                          style: const TextStyle(color: AppColors.error)),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: () => ip.fetchIncident(widget.incidentId),
@@ -134,9 +138,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       onRefresh: () => ip.fetchIncident(widget.incidentId),
                       child: _buildContent(context, incident, ip),
                     ),
-      bottomNavigationBar: incident != null
-          ? _buildActionBar(context, incident, ip)
-          : null,
+      bottomNavigationBar:
+          incident != null ? _buildActionBar(context, incident, ip) : null,
     );
   }
 
@@ -155,7 +158,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.grey.shade50,
-          border: Border(top: BorderSide(color: Colors.grey.shade300, width: 1)),
+          border:
+              Border(top: BorderSide(color: Colors.grey.shade300, width: 1)),
         ),
         child: SafeArea(
           child: Row(
@@ -193,7 +197,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   );
                 },
                 icon: const Icon(Icons.assignment, size: 18),
-                label: const Text('E-Street Form', style: TextStyle(fontSize: 12)),
+                label:
+                    const Text('E-Street Form', style: TextStyle(fontSize: 12)),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
@@ -365,7 +370,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     if (confirmed != true || !mounted) return;
 
     final notes = _notesController.text.trim();
-    
+
     // Call the appropriate action method based on next status
     bool success;
     switch (nextStatus) {
@@ -421,14 +426,14 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     if (success) {
       _notesController.clear();
       setState(() => _showNotes = false);
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Status updated to ${nextStatus.replaceAll('_', ' ')}'),
           backgroundColor: AppColors.success,
         ),
       );
-      
+
       // If status changed to "on_scene", automatically open E-Street Form
       if (nextStatus == 'on_scene') {
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -459,10 +464,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     Map<String, dynamic> incident,
     IncidentProvider ip,
   ) {
-    final type = (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
+    final type =
+        (incident['incident_type'] ?? incident['type'] ?? 'Unknown') as String;
     final status = (incident['status'] ?? 'unknown') as String;
     final severity = (incident['severity'] ?? '') as String;
-    final incNumber = incident['incident_number'] as String? ?? '#${incident['id']}';
+    final incNumber =
+        incident['incident_number'] as String? ?? '#${incident['id']}';
     final createdAt = incident['created_at'] as String?;
     final sevColor = AppColors.incidentSeverityColor(severity);
     final statColor = AppColors.incidentStatusColor(status);
@@ -477,10 +484,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     final locationDesc = incident['location_description'] as String?;
 
     // Details
-    final title = (incident['incident_title'] ?? incident['title']) as String? ?? type.replaceAll('_', ' ');
+    final title =
+        (incident['incident_title'] ?? incident['title']) as String? ??
+            type.replaceAll('_', ' ');
     final description = incident['description'] as String? ?? '';
     final peopleAffected = incident['estimated_people_affected'];
-    
+
     // Parse casualties - might be a JSON string or already a List
     List? casualties;
     if (incident['casualties'] != null) {
@@ -494,13 +503,14 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         casualties = incident['casualties'] as List;
       }
     }
-    
+
     // Parse property_damage - might be a JSON string or already a List
     List? propertyDamage;
     if (incident['property_damage'] != null) {
       if (incident['property_damage'] is String) {
         try {
-          propertyDamage = jsonDecode(incident['property_damage'] as String) as List?;
+          propertyDamage =
+              jsonDecode(incident['property_damage'] as String) as List?;
         } catch (e) {
           debugPrint('⚠️ Failed to parse property_damage JSON: $e');
         }
@@ -512,17 +522,18 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     // Reporter
     final citizen = incident['citizen'] as Map<String, dynamic>?;
     final source = incident['source'] as String?;
-    
+
     // Fallback: Parse reporter info from description if citizen object is null
     String? reporterNameFromDesc;
     String? reporterContactFromDesc;
     if (citizen == null && description.isNotEmpty) {
       // Try to extract "Reported by: NAME" and "Contact: PHONE"
-      final reportedByMatch = RegExp(r'Reported by:\s*([^\n]+)', caseSensitive: false)
-          .firstMatch(description);
+      final reportedByMatch =
+          RegExp(r'Reported by:\s*([^\n]+)', caseSensitive: false)
+              .firstMatch(description);
       final contactMatch = RegExp(r'Contact:\s*([^\n]+)', caseSensitive: false)
           .firstMatch(description);
-      
+
       if (reportedByMatch != null) {
         reporterNameFromDesc = reportedByMatch.group(1)?.trim();
       }
@@ -548,50 +559,96 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 100),
       children: [
-        // ── Hero Section ─────────────────────────────────
+        // ── AdminLTE Info Header ─────────────────────────
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(20),
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [sevColor.withOpacity(0.08), Colors.white],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.grey.shade300),
           ),
           child: Column(
             children: [
+              // Header bar
               Container(
-                width: 64,
-                height: 64,
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: sevColor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(16),
+                  color: sevColor,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(3)),
                 ),
-                child: Icon(_typeIcon(type), color: sevColor, size: 36),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                incNumber,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'monospace',
+                child: Row(
+                  children: [
+                    Icon(_typeIcon(type), color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      incNumber,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'monospace',
+                        color: Colors.white,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (timeStr.isNotEmpty)
+                      Text(
+                        timeStr,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.white.withOpacity(0.85),
+                        ),
+                      ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _chip(status.replaceAll('_', ' ').toUpperCase(), statColor),
-                  const SizedBox(width: 8),
-                  _chip(severity.toUpperCase(), sevColor, icon: Icons.warning_amber_rounded),
-                ],
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: sevColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(_typeIcon(type), color: sevColor, size: 26),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              _chip(status.replaceAll('_', ' ').toUpperCase(),
+                                  statColor),
+                              _chip(severity.toUpperCase(), sevColor,
+                                  icon: Icons.warning_amber_rounded),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 6),
-              if (timeStr.isNotEmpty)
-                Text('Created $timeStr',
-                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
             ],
           ),
         ),
@@ -614,9 +671,15 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
               }(),
             ),
             if (locationDesc != null && locationDesc.isNotEmpty)
-              _InfoRow(icon: Icons.description, label: 'Description', value: locationDesc),
+              _InfoRow(
+                  icon: Icons.description,
+                  label: 'Description',
+                  value: locationDesc),
             if (lat != null && lng != null) ...[
-              _InfoRow(icon: Icons.gps_fixed, label: 'Coordinates', value: '$lat, $lng'),
+              _InfoRow(
+                  icon: Icons.gps_fixed,
+                  label: 'Coordinates',
+                  value: '$lat, $lng'),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -637,7 +700,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           children: [
             _InfoRow(icon: Icons.title, label: 'Title', value: title),
             if (description.isNotEmpty)
-              _InfoRow(icon: Icons.notes, label: 'Description', value: description),
+              _InfoRow(
+                  icon: Icons.notes, label: 'Description', value: description),
             _InfoRow(
               icon: Icons.category,
               label: 'Type',
@@ -700,19 +764,25 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       child: _InfoRow(
                         icon: Icons.phone,
                         label: 'Phone',
-                        value: (citizen['phone'] ?? citizen['phone_number']) as String,
+                        value: (citizen['phone'] ?? citizen['phone_number'])
+                            as String,
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.call, color: AppColors.success, size: 20),
-                      onPressed: () => _callPhone(
-                          (citizen['phone'] ?? citizen['phone_number']) as String),
+                      icon: const Icon(Icons.call,
+                          color: AppColors.success, size: 20),
+                      onPressed: () => _callPhone((citizen['phone'] ??
+                          citizen['phone_number']) as String),
                     ),
                   ],
                 ),
               if (citizen['email'] != null)
-                _InfoRow(icon: Icons.email, label: 'Email', value: citizen['email'] as String),
-            ] else if (reporterNameFromDesc != null || reporterContactFromDesc != null) ...[
+                _InfoRow(
+                    icon: Icons.email,
+                    label: 'Email',
+                    value: citizen['email'] as String),
+            ] else if (reporterNameFromDesc != null ||
+                reporterContactFromDesc != null) ...[
               // Fallback: Show parsed data from description
               if (reporterNameFromDesc != null)
                 _InfoRow(
@@ -731,7 +801,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.call, color: AppColors.success, size: 20),
+                      icon: const Icon(Icons.call,
+                          color: AppColors.success, size: 20),
                       onPressed: () => _callPhone(reporterContactFromDesc!),
                     ),
                   ],
@@ -746,7 +817,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.orange.shade700),
+                    Icon(Icons.info_outline,
+                        size: 16, color: Colors.orange.shade700),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -762,31 +834,35 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 ),
               ),
             ] else
-              const _InfoRow(icon: Icons.person, label: 'Reporter', value: 'No reporter info'),
+              const _InfoRow(
+                  icon: Icons.person,
+                  label: 'Reporter',
+                  value: 'No reporter info'),
             if (source != null)
               _InfoRow(icon: Icons.source, label: 'Source', value: source),
           ],
         ),
 
-        // ── Response Section ────────────────────────────── 
+        // ── Response Section ──────────────────────────────
         Builder(
           builder: (context) {
             // Parse status_history - might be a JSON string or already a List
             List? statusHistory;
             if (incident['status_history'] is String) {
               try {
-                statusHistory = jsonDecode(incident['status_history'] as String) as List?;
+                statusHistory =
+                    jsonDecode(incident['status_history'] as String) as List?;
               } catch (e) {
                 debugPrint('⚠️ Failed to parse status_history JSON: $e');
               }
             } else if (incident['status_history'] is List) {
               statusHistory = incident['status_history'] as List;
             }
-            
+
             if (statusHistory == null || statusHistory.isEmpty) {
               return const SizedBox.shrink();
             }
-            
+
             return _SectionCard(
               icon: Icons.history,
               title: 'Status History',
@@ -794,7 +870,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 ...statusHistory.map<Widget>((entry) {
                   final e = entry as Map<String, dynamic>;
                   final eStatus = e['status'] as String? ?? '';
-                  final eTime = e['timestamp'] as String? ?? e['created_at'] as String? ?? '';
+                  final eTime = e['timestamp'] as String? ??
+                      e['created_at'] as String? ??
+                      '';
                   String eTimeStr = eTime;
                   try {
                     eTimeStr = timeago.format(DateTime.parse(eTime));
@@ -815,11 +893,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                         Expanded(
                           child: Text(
                             eStatus.replaceAll('_', ' ').toUpperCase(),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w500),
                           ),
                         ),
                         Text(eTimeStr,
-                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                            style: const TextStyle(
+                                fontSize: 11, color: AppColors.textHint)),
                       ],
                     ),
                   );
@@ -850,11 +930,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
 
   void _showLocationHistory(BuildContext context) async {
     final ip = context.read<IncidentProvider>();
-    
+
     // Get location updates from the current incident data (already loaded)
     final incident = ip.currentIncident;
-    final updates = (incident?['location_updates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    
+    final updates = (incident?['location_updates'] as List?)
+            ?.cast<Map<String, dynamic>>() ??
+        [];
+
     debugPrint('📍 Showing location history: ${updates.length} updates');
 
     if (!mounted) return;
@@ -878,9 +960,11 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text('Location Update History',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   Text('${updates.length} points',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textHint)),
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textHint)),
                 ],
               ),
             ),
@@ -891,13 +975,15 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.location_off, size: 48, color: AppColors.textHint),
+                          Icon(Icons.location_off,
+                              size: 48, color: AppColors.textHint),
                           SizedBox(height: 8),
                           Text('No location updates yet',
                               style: TextStyle(color: AppColors.textHint)),
                           SizedBox(height: 4),
                           Text('Responder location will appear here',
-                              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+                              style: TextStyle(
+                                  fontSize: 12, color: AppColors.textHint)),
                         ],
                       ),
                     )
@@ -908,28 +994,32 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       itemBuilder: (_, i) {
                         final u = updates[i];
                         String tStr = '';
-                        String timestamp = u['timestamp'] as String? ?? u['created_at'] as String? ?? '';
+                        String timestamp = u['timestamp'] as String? ??
+                            u['created_at'] as String? ??
+                            '';
                         try {
                           tStr = timeago.format(DateTime.parse(timestamp));
                         } catch (_) {
                           tStr = timestamp;
                         }
-                        
+
                         final lat = u['latitude'];
                         final lng = u['longitude'];
                         final accuracy = u['accuracy'];
                         final speed = u['speed'];
                         final heading = u['heading'];
-                        
+
                         return ListTile(
                           leading: CircleAvatar(
                             backgroundColor: AppColors.primary.withOpacity(0.1),
                             radius: 20,
-                            child: const Icon(Icons.location_on, size: 20, color: AppColors.primary),
+                            child: const Icon(Icons.location_on,
+                                size: 20, color: AppColors.primary),
                           ),
                           title: Text(
                             '$lat, $lng',
-                            style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                            style: const TextStyle(
+                                fontSize: 13, fontFamily: 'monospace'),
                           ),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -941,14 +1031,20 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                                   child: Row(
                                     children: [
                                       if (accuracy != null)
-                                        Text('±${accuracy}m', 
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                        Text('±${accuracy}m',
+                                            style: const TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.textHint)),
                                       if (accuracy != null && speed != null)
-                                        const Text(' • ', 
-                                            style: TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                        const Text(' • ',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.textHint)),
                                       if (speed != null)
-                                        Text('${speed}m/s', 
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                                        Text('${speed}m/s',
+                                            style: const TextStyle(
+                                                fontSize: 11,
+                                                color: AppColors.textHint)),
                                     ],
                                   ),
                                 ),
@@ -1001,7 +1097,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   void _openInMaps(dynamic lat, dynamic lng) async {
-    final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final url =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
@@ -1022,7 +1119,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No E-Street form data available. Please fill out the form first.'),
+            content: Text(
+                'No E-Street form data available. Please fill out the form first.'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1112,26 +1210,35 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   /// so we load them from local file storage (saved during form submission).
   Future<void> _enrichWithLocalImages(EStreetFormModel formModel) async {
     try {
-      final localData = await EStreetLocalStorage.loadAllImages(widget.incidentId);
+      final localData =
+          await EStreetLocalStorage.loadAllImages(widget.incidentId);
 
       if (localData.isEmpty) {
-        print('⚠️ No locally saved images found for incident ${widget.incidentId}');
+        print(
+            '⚠️ No locally saved images found for incident ${widget.incidentId}');
         return;
       }
 
-      if (formModel.patientSignature == null && localData['patient_signature'] != null) {
+      if (formModel.patientSignature == null &&
+          localData['patient_signature'] != null) {
         formModel.patientSignature = localData['patient_signature'] as String;
       }
-      if (formModel.doctorSignature == null && localData['doctor_signature'] != null) {
+      if (formModel.doctorSignature == null &&
+          localData['doctor_signature'] != null) {
         formModel.doctorSignature = localData['doctor_signature'] as String;
       }
-      if (formModel.responderSignature == null && localData['responder_signature'] != null) {
-        formModel.responderSignature = localData['responder_signature'] as String;
+      if (formModel.responderSignature == null &&
+          localData['responder_signature'] != null) {
+        formModel.responderSignature =
+            localData['responder_signature'] as String;
       }
-      if (formModel.bodyDiagramScreenshot == null && localData['body_diagram_screenshot'] != null) {
-        formModel.bodyDiagramScreenshot = localData['body_diagram_screenshot'] as String;
+      if (formModel.bodyDiagramScreenshot == null &&
+          localData['body_diagram_screenshot'] != null) {
+        formModel.bodyDiagramScreenshot =
+            localData['body_diagram_screenshot'] as String;
       }
-      if (formModel.bodyObservations.isEmpty && localData['body_observations'] != null) {
+      if (formModel.bodyObservations.isEmpty &&
+          localData['body_observations'] != null) {
         try {
           final obsStr = localData['body_observations'] as String;
           final decoded = jsonDecode(obsStr);
@@ -1165,29 +1272,50 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Panel header
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(3)),
+            ),
+            child: Row(
               children: [
-                Icon(icon, size: 18, color: AppColors.primary),
+                Icon(icon, size: 16, color: AppColors.primary),
                 const SizedBox(width: 8),
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            ...children,
-          ],
-        ),
+          ),
+          // Panel body
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: children,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1200,7 +1328,8 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _InfoRow(
+      {required this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -1214,7 +1343,8 @@ class _InfoRow extends StatelessWidget {
           SizedBox(
             width: 90,
             child: Text(label,
-                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary)),
           ),
           Expanded(
             child: Text(
@@ -1263,7 +1393,8 @@ class _ExpandableInfoState extends State<_ExpandableInfo> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(widget.title,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w500)),
                 ),
                 Icon(
                   _expanded ? Icons.expand_less : Icons.expand_more,

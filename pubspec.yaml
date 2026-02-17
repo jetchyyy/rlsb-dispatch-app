@@ -79,4 +79,7 @@ flutter:
   assets:
     - assets/images/body_front.png
     - assets/images/body_back.png
+    - assets/images/header.jpg
+    - assets/images/hero1.png
+    - assets/images/pdrrmologo.png
     - assets/sounds/alarm.wav

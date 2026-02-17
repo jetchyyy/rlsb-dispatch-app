@@ -1,0 +1,13 @@
+﻿ android/app/src/main/AndroidManifest.xml           |    1 +
+ android/gradle.properties                          |    1 +
+ lib/core/constants/app_colors.dart                 |   28 +-
+ .../auth/presentation/screens/login_screen.dart    |  465 ++++----
+ lib/features/auth/screens/login_screen.dart        |  353 +++---
+ .../dashboard/screens/dashboard_screen.dart        |  480 ++++----
+ .../dashboard/widgets/map_preview_card.dart        |   10 +-
+ .../incidents/screens/analytics_screen.dart        |  383 ++++---
+ .../incidents/screens/create_incident_screen.dart  | 1186 ++++++++++++++------
+ .../incidents/screens/incident_detail_screen.dart  |  375 +++++--
+ .../incidents/screens/incidents_list_screen.dart   | 1146 +++++++++----------
+ pubspec.yaml                                       |    4 +
+ 12 files changed, 2676 insertions(+), 1756 deletions(-)
