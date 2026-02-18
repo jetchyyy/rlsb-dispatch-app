@@ -45,6 +45,12 @@ class LocationTrackingProvider extends ChangeNotifier {
         _locationService = locationService,
         _offlineBox = offlineBox;
 
+  // ── Callbacks ──────────────────────────────────────────────
+
+  /// Called after each valid GPS fix so the wiring layer can
+  /// delegate to [IncidentResponseProvider.checkArrival].
+  void Function(Position position)? onPositionCaptured;
+
   // ── State ──────────────────────────────────────────────────
 
   TrackingMode _mode = TrackingMode.off;
@@ -52,6 +58,11 @@ class LocationTrackingProvider extends ChangeNotifier {
   Position? _lastPosition;
   bool _isTracking = false;
   String? _errorMessage;
+
+  /// Current response status sent with every location update.
+  /// Defaults to `'available'` and is synced by the wiring layer
+  /// whenever [IncidentResponseProvider] changes state.
+  String _responseStatus = 'available';
 
   /// Timer that fires to capture a GPS fix.
   Timer? _captureTimer;
@@ -63,7 +74,14 @@ class LocationTrackingProvider extends ChangeNotifier {
   Position? get lastPosition => _lastPosition;
   bool get isTracking => _isTracking;
   String? get errorMessage => _errorMessage;
+  String get responseStatus => _responseStatus;
   int get pendingUpdates => _offlineBox.length;
+
+  /// Update the response status included in location payloads.
+  set responseStatus(String value) {
+    _responseStatus = value;
+    debugPrint('📍 Response status updated to: $value');
+  }
 
   // ── Public API ─────────────────────────────────────────────
 
@@ -190,6 +208,9 @@ class LocationTrackingProvider extends ChangeNotifier {
 
       _lastPosition = position;
 
+      // Notify listeners (e.g. auto-arrival detection)
+      onPositionCaptured?.call(position);
+
       final entry = <String, dynamic>{
         'latitude': position.latitude,
         'longitude': position.longitude,
@@ -199,6 +220,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         'heading': position.heading,
         'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
         'timestamp': position.timestamp.toUtc().toIso8601String(),
+        'response_status': _responseStatus,
       };
       if (_activeIncidentId != null) {
         entry['incident_id'] = _activeIncidentId;

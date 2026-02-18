@@ -8,6 +8,7 @@ import 'app.dart';
 import 'core/constants/api_constants.dart';
 import 'core/network/api_client.dart';
 import 'core/providers/incident_provider.dart';
+import 'core/providers/incident_response_provider.dart';
 import 'core/providers/injury_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
 import 'core/services/background_service_initializer.dart';
@@ -66,6 +67,9 @@ void main() async {
     offlineBox: locationQueueBox,
   );
 
+  // Create incident response provider (pure state, no dependencies)
+  final incidentResponseProvider = IncidentResponseProvider();
+
   // Load token from secure storage to SharedPreferences (for Dio interceptor)
   await tokenStorage.loadTokenToRuntime();
 
@@ -98,6 +102,9 @@ void main() async {
         ),
         ChangeNotifierProvider.value(
           value: locationTrackingProvider,
+        ),
+        ChangeNotifierProvider.value(
+          value: incidentResponseProvider,
         ),
       ],
       child: const App(),

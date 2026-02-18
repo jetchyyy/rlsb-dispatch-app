@@ -50,6 +50,10 @@ class IncidentProvider extends ChangeNotifier {
   /// Signals the tracking system to revert to passive mode.
   VoidCallback? onRespondEnded;
 
+  /// Called when the responder marks arrival on scene.
+  /// Passes the incident ID so the response provider can record arrival.
+  void Function(int incidentId)? onOnSceneReached;
+
   // ── Getters ────────────────────────────────────────────────
 
   List<Map<String, dynamic>> get incidents => _incidents;
@@ -511,8 +515,13 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   Future<bool> markOnScene(int id, {String? notes}) async {
-    return _performAction(
+    final success = await _performAction(
         id, 'on-scene', ApiConstants.incidentOnScene(id), notes);
+    if (success) {
+      debugPrint('📍 On-scene succeeded — notifying response provider for incident #$id');
+      onOnSceneReached?.call(id);
+    }
+    return success;
   }
 
   Future<bool> resolveIncident(int id, {String? notes}) async {

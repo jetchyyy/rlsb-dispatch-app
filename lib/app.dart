@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 
 import 'core/constants/app_colors.dart';
 import 'core/providers/incident_provider.dart';
+import 'core/providers/incident_response_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
 import 'core/services/background_service_initializer.dart';
 import 'core/widgets/incident_alert_overlay.dart';
+import 'core/widgets/response_status_banner.dart';
 import 'features/admin/screens/dispatcher_tracker_screen.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
@@ -60,8 +62,10 @@ class _AppState extends State<App> {
   void _registerLocationCallbacks() {
     final incidentProvider = context.read<IncidentProvider>();
     final locationProvider = context.read<LocationTrackingProvider>();
+    final responseProvider = context.read<IncidentResponseProvider>();
 
     // When the responder taps "Respond" → switch to 5-second active tracking
+    // and start the response lifecycle (en_route).
     incidentProvider.onRespondStarted = (incidentId) {
       debugPrint('📍 App: Respond started → activating GPS for incident #$incidentId');
       locationProvider.startActiveTracking(incidentId);
@@ -70,6 +74,33 @@ class _AppState extends State<App> {
       BackgroundServiceInitializer.updateNotification(
         'PDRRMO Dispatch',
         'Active tracking — responding to incident #$incidentId',
+      );
+
+      // Read incident coordinates from the loaded detail
+      final incident = incidentProvider.currentIncident;
+      final lat = (incident?['latitude'] as num?)?.toDouble() ?? 0.0;
+      final lng = (incident?['longitude'] as num?)?.toDouble() ?? 0.0;
+
+      // Start response tracking with incident coordinates
+      responseProvider.acceptIncident(
+        incidentId: incidentId,
+        lat: lat,
+        lng: lng,
+      );
+      locationProvider.responseStatus = responseProvider.responseStatus;
+    };
+
+    // When on-scene is reached (manual via incident action button)
+    incidentProvider.onOnSceneReached = (incidentId) {
+      debugPrint('📍 App: On-scene reached for incident #$incidentId');
+      // Only mark on_scene if the response provider hasn't auto-detected it
+      if (responseProvider.responseStatus != ResponseStatus.onScene) {
+        responseProvider.markOnScene();
+      }
+      locationProvider.responseStatus = responseProvider.responseStatus;
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'On scene — incident #$incidentId',
       );
     };
 
@@ -82,7 +113,20 @@ class _AppState extends State<App> {
         'PDRRMO Dispatch',
         'Location tracking is active',
       );
+
+      responseProvider.completeIncident();
+      locationProvider.responseStatus = responseProvider.responseStatus;
     };
+
+    // Auto-arrival detection: delegate each GPS fix to the response provider
+    locationProvider.onPositionCaptured = (position) {
+      responseProvider.checkArrival(position);
+    };
+
+    // Sync response status changes back to the location provider
+    responseProvider.addListener(() {
+      locationProvider.responseStatus = responseProvider.responseStatus;
+    });
   }
 
   // ── Auth State Transitions ─────────────────────────────────
@@ -146,8 +190,28 @@ class _AppState extends State<App> {
       builder: (context, child) {
         return Stack(
           children: [
-            // The actual routed page
-            child ?? const SizedBox.shrink(),
+            // The actual routed page — push down below the banner
+            // when actively responding to an incident.
+            Consumer<IncidentResponseProvider>(
+              builder: (context, rp, _) {
+                if (!rp.isRespondingToIncident) {
+                  return child ?? const SizedBox.shrink();
+                }
+                // Reserve space at the top for the response banner
+                return Padding(
+                  padding: const EdgeInsets.only(top: 56),
+                  child: child ?? const SizedBox.shrink(),
+                );
+              },
+            ),
+
+            // Response status banner (top, across all screens)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: ResponseStatusBanner(),
+            ),
 
             // Red flash overlay when new incidents arrive
             if (_pendingAlertIncidents != null &&
