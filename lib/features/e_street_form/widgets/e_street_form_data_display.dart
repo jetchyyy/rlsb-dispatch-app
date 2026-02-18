@@ -1,20 +1,41 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../models/e_street_form_model.dart';
-import '../services/e_street_local_storage.dart';
-import '../services/e_street_pdf_generator.dart';
+import '../screens/pdf_viewer_screen.dart';
 
-/// Widget to display completed e-street form data in a readable format
+/// Read-only display of a submitted E-Street Form.
+///
+/// Parses the JSON string stored on the incident, renders all
+/// sections, and provides PDF action buttons that use the
+/// server-generated PDF (same as MIS web version).
 class EStreetFormDataDisplay extends StatelessWidget {
   final String? eStreetFormJson;
+  final String? eStreetFormPdfPath;
   final int incidentId;
+
+  /// Base storage URL for the backend (without trailing slash).
+  static const String _storageBaseUrl = 'https://pdrrmosdn-sandbox.inno.ph/storage';
 
   const EStreetFormDataDisplay({
     super.key,
-    this.eStreetFormJson,
+    required this.eStreetFormJson,
+    this.eStreetFormPdfPath,
     required this.incidentId,
   });
+
+  /// Returns the full URL to the server-generated PDF.
+  String? get serverPdfUrl {
+    if (eStreetFormPdfPath == null || eStreetFormPdfPath!.isEmpty) return null;
+    return '$_storageBaseUrl/$eStreetFormPdfPath';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,592 +43,501 @@ class EStreetFormDataDisplay extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    Map<String, dynamic>? formData;
+    EStreetFormModel? form;
     try {
-      formData = json.decode(eStreetFormJson!) as Map<String, dynamic>;
-    } catch (e) {
-      return Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(Icons.error_outline, color: AppColors.error),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Error parsing e-street form data',
-                  style: TextStyle(color: AppColors.error),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+      final json = jsonDecode(eStreetFormJson!);
+      if (json is Map<String, dynamic>) {
+        form = EStreetFormModel.fromJson(json);
+      }
+    } catch (_) {}
 
-    // Check if there's any meaningful data  
-    if (!_hasAnyData(formData)) {
-      return const SizedBox.shrink();
-    }
-
-    // At this point, formData is confirmed non-null
-    final data = formData;
+    if (form == null) return const SizedBox.shrink();
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Row(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header + Actions
+            Row(
               children: [
-                Icon(Icons.medical_information, color: AppColors.primary, size: 24),
-                const SizedBox(width: 12),
-                const Text(
-                  'E-Street Form Data',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                const Icon(Icons.assignment, color: AppColors.primary, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'E-Street Form',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
+                _ActionButtons(pdfUrl: serverPdfUrl, incidentId: incidentId),
               ],
             ),
-          ),
+            const Divider(height: 20),
 
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Patient Information Section
-                if (_hasPatientInfo(data)) ...[
-                  _sectionHeader('Patient Information', Icons.person),
-                  const SizedBox(height: 8),
-                  if (data['name'] != null)
-                    _detailRow('Name', data['name']),
-                  if (data['age'] != null)
-                    _detailRow('Age', data['age'].toString()),
-                  if (data['sex'] != null)
-                    _detailRow('Sex', data['sex']),
-                  if (data['address'] != null)
-                    _detailRow('Address', data['address']),
-                  if (data['date_of_birth'] != null)
-                    _detailRow('Date of Birth', data['date_of_birth']),
-                  if (data['emergency_contact'] != null)
-                    _detailRow('Emergency Contact', data['emergency_contact']),
-                  const Divider(height: 24),
+            // Patient Info
+            if (_hasPatientInfo(form)) ...[
+              _sectionTitle('Patient Information'),
+              _fieldRow('Name', form.name),
+              _fieldRow('Age', form.age),
+              _fieldRow('Sex', form.sex),
+              _fieldRow('Date of Birth', form.dateOfBirth),
+              _fieldRow('Address', form.address),
+              _fieldRow('Emergency Contact', form.emergencyContact),
+              _fieldRow('Incident Date/Time', form.incidentDatetime),
+              _fieldRow('Allergies', form.allergies),
+              _fieldRow('Current Medications', form.currentMedications),
+              _fieldRow('Medical History', form.medicalHistory),
+              const SizedBox(height: 12),
+            ],
+
+            // Medical Assessment
+            if (_hasAssessment(form)) ...[
+              _sectionTitle('Medical Assessment'),
+              _fieldRow('Chief Complaint', form.chiefComplaint),
+              _fieldRow('History', form.history),
+              _fieldRow('Pain Scale', form.painScale?.toString()),
+              _fieldRow('Consciousness', form.consciousnessLevel),
+              if (form.gcsEye != null || form.gcsVerbal != null || form.gcsMotor != null)
+                _fieldRow(
+                  'GCS',
+                  'E${form.gcsEye ?? "-"} V${form.gcsVerbal ?? "-"} M${form.gcsMotor ?? "-"} = ${form.gcsTotal}',
+                ),
+              _fieldRow('Pupils', form.pupils),
+              const SizedBox(height: 4),
+            ],
+
+            // Vital Signs
+            if (_hasVitals(form)) ...[
+              _sectionTitle('Vital Signs'),
+              Wrap(
+                spacing: 16,
+                runSpacing: 4,
+                children: [
+                  if (form.bloodPressure != null) _vitalChip('BP', form.bloodPressure!),
+                  if (form.pulse != null) _vitalChip('Pulse', form.pulse!),
+                  if (form.respiratory != null) _vitalChip('Resp', form.respiratory!),
+                  if (form.temperature != null) _vitalChip('Temp', form.temperature!),
+                  if (form.spo2 != null) _vitalChip('SpO₂', form.spo2!),
+                  if (form.bloodGlucose != null) _vitalChip('Glucose', form.bloodGlucose!),
                 ],
+              ),
+              const SizedBox(height: 12),
+            ],
 
-                // Incident Details Section
-                if (_hasIncidentDetails(data)) ...[
-                  _sectionHeader('Incident Details', Icons.event_note),
-                  const SizedBox(height: 8),
-                  if (data['incident_datetime'] != null)
-                    _detailRow('Incident Date/Time', data['incident_datetime']),
-                  if (data['chief_complaint'] != null)
-                    _detailRow('Chief Complaint', data['chief_complaint']),
-                  if (data['history'] != null)
-                    _detailRow('History', data['history']),
-                  const Divider(height: 24),
-                ],
+            // Skin Assessment
+            if (form.skin.isNotEmpty) ...[
+              _sectionTitle('Skin Assessment'),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: form.skin
+                    .map((s) => Chip(
+                          label: Text(s, style: const TextStyle(fontSize: 12)),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: 12),
+            ],
 
-                // Medical History Section
-                if (_hasMedicalHistory(data)) ...[
-                  _sectionHeader('Medical History', Icons.history_edu),
-                  const SizedBox(height: 8),
-                  if (data['allergies'] != null)
-                    _detailRow('Allergies', data['allergies']),
-                  if (data['current_medications'] != null)
-                    _detailRow('Current Medications', data['current_medications']),
-                  if (data['medical_history'] != null)
-                    _detailRow('Medical History', data['medical_history']),
-                  const Divider(height: 24),
-                ],
+            // Treatment
+            if (_hasTreatment(form)) ...[
+              _sectionTitle('Treatment & Interventions'),
+              if (form.aid.isNotEmpty)
+                _chipList('Aid Provided', form.aid),
+              _fieldRow('Medications Given', form.medicationsGiven),
+              _fieldRow('IV Fluids', form.ivFluids),
+              if (form.equipment.isNotEmpty)
+                _chipList('Equipment Used', form.equipment),
+              _fieldRow('Treatment Response', form.treatmentResponse),
+              _fieldRow('Treatment Notes', form.treatmentNotes),
+              const SizedBox(height: 12),
+            ],
 
-                // Assessment Section
-                if (_hasAssessment(data)) ...[
-                  _sectionHeader('Assessment', Icons.assessment),
-                  const SizedBox(height: 8),
-                  if (data['pain_scale'] != null)
-                    _detailRow('Pain Scale', data['pain_scale'].toString()),
-                  if (data['consciousness_level'] != null)
-                    _detailRow('Consciousness Level', data['consciousness_level']),
-                  if (_hasGCS(data)) ...[
-                    const SizedBox(height: 8),
-                    _detailRow('GCS Eye', data['gcs_eye']?.toString() ?? 'N/A'),
-                    _detailRow('GCS Verbal', data['gcs_verbal']?.toString() ?? 'N/A'),
-                    _detailRow('GCS Motor', data['gcs_motor']?.toString() ?? 'N/A'),
-                    _detailRow('GCS Total', data['gcs_total']?.toString() ?? 'N/A'),
-                  ],
-                  const Divider(height: 24),
-                ],
-
-                // Vital Signs Section
-                if (_hasVitalSigns(data)) ...[
-                  _sectionHeader('Vital Signs', Icons.favorite),
-                  const SizedBox(height: 8),
-                  if (data['blood_pressure'] != null)
-                    _detailRow('Blood Pressure', data['blood_pressure']),
-                  if (data['pulse'] != null)
-                    _detailRow('Pulse', data['pulse']),
-                  if (data['respiratory'] != null)
-                    _detailRow('Respiratory Rate', data['respiratory']),
-                  if (data['temperature'] != null)
-                    _detailRow('Temperature', data['temperature']),
-                  if (data['spo2'] != null)
-                    _detailRow('SpO₂', data['spo2']),
-                  if (data['blood_glucose'] != null)
-                    _detailRow('Blood Glucose', data['blood_glucose']),
-                  if (data['pupils'] != null)
-                    _detailRow('Pupils', data['pupils']),
-                  const Divider(height: 24),
-                ],
-
-                // Treatment Section
-                if (_hasTreatment(data)) ...[
-                  _sectionHeader('Treatment', Icons.medication),
-                  const SizedBox(height: 8),
-                  if (data['medications_given'] != null)
-                    _detailRow('Medications Given', data['medications_given']),
-                  if (data['iv_fluids'] != null)
-                    _detailRow('IV Fluids', data['iv_fluids']),
-                  if (data['treatment_response'] != null)
-                    _detailRow('Treatment Response', data['treatment_response']),
-                  if (data['treatment_notes'] != null)
-                    _detailRow('Treatment Notes', data['treatment_notes']),
-                  const Divider(height: 24),
-                ],
-
-                // Transport Section
-                if (_hasTransportInfo(data)) ...[
-                  _sectionHeader('Transport Information', Icons.local_shipping),
-                  const SizedBox(height: 8),
-                  if (data['time_called'] != null)
-                    _detailRow('Time Called', data['time_called']),
-                  if (data['time_arrived_scene'] != null)
-                    _detailRow('Time Arrived Scene', data['time_arrived_scene']),
-                  if (data['time_departed_scene'] != null)
-                    _detailRow('Time Departed Scene', data['time_departed_scene']),
-                  if (data['time_arrived_hospital'] != null)
-                    _detailRow('Time Arrived Hospital', data['time_arrived_hospital']),
-                  if (data['transport_method'] != null)
-                    _detailRow('Transport Method', data['transport_method']),
-                  const Divider(height: 24),
-                ],
-
-                // Crew Section
-                if (_hasCrewInfo(data)) ...[
-                  _sectionHeader('Crew Information', Icons.groups),
-                  const SizedBox(height: 8),
-                  if (data['primary_crew'] != null)
-                    _detailRow('Primary Crew', data['primary_crew']),
-                  if (data['secondary_crew'] != null)
-                    _detailRow('Secondary Crew', data['secondary_crew']),
-                ],
-
-                // Action Buttons
-                const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                Row(
+            // Transport
+            if (_hasTransport(form)) ...[
+              _sectionTitle('Transport & Outcome'),
+              if (form.timeCalled != null ||
+                  form.timeArrivedScene != null ||
+                  form.timeDepartedScene != null ||
+                  form.timeArrivedHospital != null) ...[
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 4,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _handleShare(context, data),
-                        icon: const Icon(Icons.share, size: 20),
-                        label: const Text('Share'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _handlePreviewPdf(context, data),
-                        icon: const Icon(Icons.preview, size: 20),
-                        label: const Text('Preview'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _handleSavePdf(context, data),
-                        icon: const Icon(Icons.download, size: 20),
-                        label: const Text('Save'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          backgroundColor: AppColors.success,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
+                    if (form.timeCalled != null)
+                      _vitalChip('Called', form.timeCalled!),
+                    if (form.timeArrivedScene != null)
+                      _vitalChip('On Scene', form.timeArrivedScene!),
+                    if (form.timeDepartedScene != null)
+                      _vitalChip('Departed', form.timeDepartedScene!),
+                    if (form.timeArrivedHospital != null)
+                      _vitalChip('At Hospital', form.timeArrivedHospital!),
                   ],
                 ),
+                const SizedBox(height: 8),
+              ],
+              if (form.ambulanceType.isNotEmpty)
+                _chipList('Ambulance Type', form.ambulanceType),
+              _fieldRow('Transport Method', form.transportMethod),
+              _fieldRow('Hospital', form.hospital == 'OTHER' ? form.hospitalOther : form.hospital),
+              if (form.passenger.isNotEmpty)
+                _chipList('Passengers', form.passenger),
+              _fieldRow('Primary Crew', form.primaryCrew),
+              _fieldRow('Secondary Crew', form.secondaryCrew),
+              _fieldRow('Final Outcome', form.finalOutcome),
+              const SizedBox(height: 12),
+            ],
+
+            // Doctor / Physician
+            if (_hasDoctor(form)) ...[
+              _sectionTitle('Receiving Physician'),
+              _fieldRow('Doctor Name', form.doctorName),
+              _fieldRow('License Number', form.licenseNumber),
+              _fieldRow('Hospital', form.hospital == 'OTHER' ? form.hospitalOther : form.hospital),
+              _fieldRow('Physician Report', form.physicianReport),
+              const SizedBox(height: 12),
+            ],
+
+            // Body Observations
+            if (form.bodyObservations.isNotEmpty) ...[
+              _sectionTitle('Body Observations'),
+              ...form.bodyObservations.entries.map((e) {
+                final label = e.key.replaceAll('_', ' ').split(' ').map(
+                  (w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}',
+                ).join(' ');
+                return _fieldRow(label, e.value);
+              }),
+              const SizedBox(height: 12),
+            ],
+
+            // Final Comments
+            if (form.finalComments != null && form.finalComments!.isNotEmpty) ...[
+              _sectionTitle('Final Comments'),
+              Text(form.finalComments!, style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 12),
+            ],
+
+            // Signatures indicator
+            _sectionTitle('Signatures'),
+            Row(
+              children: [
+                _signatureIndicator('Patient', form.patientSignature),
+                const SizedBox(width: 12),
+                _signatureIndicator('Doctor', form.doctorSignature),
+                const SizedBox(width: 12),
+                _signatureIndicator('Responder', form.responderSignature),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Future<void> _handleShare(BuildContext context, Map<String, dynamic> formData) async {
-    try {
-      // Show loading
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
+  // ── Section helpers ─────────────────────────────────────
+
+  static Widget _sectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: AppColors.primary,
         ),
-      );
-
-      // Create form model and enrich with locally saved images
-      final formModel = EStreetFormModel.fromJson(formData);
-      await _enrichWithLocalImages(formModel);
-      
-      print('📝 Form model created for sharing...');
-      print('   Body diagram screenshot: ${formModel.bodyDiagramScreenshot != null ? "EXISTS (${formModel.bodyDiagramScreenshot!.length} chars)" : "NULL"}');
-      print('   Patient signature: ${formModel.patientSignature != null ? "EXISTS" : "NULL"}');
-      print('   Body observations: ${formModel.bodyObservations.length} entries');
-      
-      await EStreetPdfGenerator.sharePdf(formModel, incidentId);
-
-      // Close loading
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
-    } catch (e) {
-      // Close loading if open
-      if (context.mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      // Show error
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error sharing: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _handleSavePdf(BuildContext context, Map<String, dynamic> formData) async {
-    try {
-      // Show loading
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      // Create form model and enrich with locally saved images
-      final formModel = EStreetFormModel.fromJson(formData);
-      await _enrichWithLocalImages(formModel);
-      
-      print('📝 Form model created for PDF, checking body diagram...');
-      print('   Body diagram screenshot: ${formModel.bodyDiagramScreenshot != null ? "EXISTS (${formModel.bodyDiagramScreenshot!.length} chars)" : "NULL"}');
-      print('   Patient signature: ${formModel.patientSignature != null ? "EXISTS" : "NULL"}');
-      print('   Body observations: ${formModel.bodyObservations.length} entries');
-      
-      final filePath = await EStreetPdfGenerator.downloadPdf(formModel, incidentId);
-
-      // Close loading
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
-
-      // Show success with action to view
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('PDF saved successfully!', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(filePath, style: const TextStyle(fontSize: 12)),
-                const SizedBox(height: 8),
-                const Text('📁 Check your Downloads folder or Files app', style: TextStyle(fontSize: 12)),
-              ],
-            ),
-            backgroundColor: AppColors.success,
-            duration: const Duration(seconds: 6),
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      print('❌ Error saving PDF: $e');
-      // Close loading if open
-      if (context.mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      // Show error
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving PDF: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _handlePreviewPdf(BuildContext context, Map<String, dynamic> formData) async {
-    try {
-      // Show loading
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      // Create form model and enrich with locally saved images
-      final formModel = EStreetFormModel.fromJson(formData);
-      await _enrichWithLocalImages(formModel);
-      
-      print('📝 Form model created for PDF preview...');
-      print('   Body diagram screenshot: ${formModel.bodyDiagramScreenshot != null ? "EXISTS (${formModel.bodyDiagramScreenshot!.length} chars)" : "NULL"}');
-      print('   Patient signature: ${formModel.patientSignature != null ? "EXISTS" : "NULL"}');
-      print('   Body observations: ${formModel.bodyObservations.length} entries');
-
-      // Close loading
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
-      
-      // Show PDF preview
-      await EStreetPdfGenerator.printPdf(formModel, incidentId);
-    } catch (e) {
-      print('❌ Error previewing PDF: $e');
-      // Close loading if open
-      if (context.mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      // Show error
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error previewing PDF: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-    }
-  }
-
-  Widget _sectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: AppColors.primary),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: AppColors.primary,
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _detailRow(String label, String value) {
-    if (value.isEmpty || value == 'null') return const SizedBox.shrink();
-    
+  static Widget _fieldRow(String label, String? value) {
+    if (value == null || value.trim().isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 140,
+            width: 130,
             child: Text(
               label,
               style: const TextStyle(
+                fontSize: 12,
                 color: AppColors.textSecondary,
                 fontWeight: FontWeight.w500,
-                fontSize: 13,
               ),
             ),
           ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontWeight: FontWeight.w400,
-                fontSize: 13,
-              ),
-            ),
+            child: Text(value, style: const TextStyle(fontSize: 13)),
           ),
         ],
       ),
     );
   }
 
-  // Helper methods to check if sections have data
-  bool _hasAnyData(Map<String, dynamic> data) {
-    return _hasPatientInfo(data) ||
-        _hasIncidentDetails(data) ||
-        _hasMedicalHistory(data) ||
-        _hasAssessment(data) ||
-        _hasVitalSigns(data) ||
-        _hasTreatment(data) ||
-        _hasTransportInfo(data) ||
-        _hasCrewInfo(data);
+  static Widget _vitalChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
   }
 
-  bool _hasPatientInfo(Map<String, dynamic> data) {
-    return data['name'] != null ||
-        data['age'] != null ||
-        data['sex'] != null ||
-        data['address'] != null ||
-        data['date_of_birth'] != null ||
-        data['emergency_contact'] != null;
+  static Widget _chipList(String label, List<String> items) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: items
+                .map((s) => Chip(
+                      label: Text(s, style: const TextStyle(fontSize: 11)),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ))
+                .toList(),
+          ),
+        ],
+      ),
+    );
   }
 
-  bool _hasIncidentDetails(Map<String, dynamic> data) {
-    return data['incident_datetime'] != null ||
-        data['chief_complaint'] != null ||
-        data['history'] != null;
+  static Widget _signatureIndicator(String label, String? data) {
+    final signed = data != null && data.isNotEmpty;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          signed ? Icons.check_circle : Icons.cancel,
+          size: 16,
+          color: signed ? Colors.green : Colors.grey,
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 12)),
+      ],
+    );
   }
 
-  bool _hasMedicalHistory(Map<String, dynamic> data) {
-    return data['allergies'] != null ||
-        data['current_medications'] != null ||
-        data['medical_history'] != null;
-  }
+  // ── Has-data checks ─────────────────────────────────────
 
-  bool _hasAssessment(Map<String, dynamic> data) {
-    return data['pain_scale'] != null ||
-        data['consciousness_level'] != null ||
-        _hasGCS(data);
-  }
+  bool _hasPatientInfo(EStreetFormModel f) =>
+      f.name.isNotEmpty ||
+      f.age != null ||
+      f.sex != null ||
+      f.address != null ||
+      f.dateOfBirth != null;
 
-  bool _hasGCS(Map<String, dynamic> data) {
-    return data['gcs_eye'] != null ||
-        data['gcs_verbal'] != null ||
-        data['gcs_motor'] != null ||
-        data['gcs_total'] != null;
-  }
+  bool _hasAssessment(EStreetFormModel f) =>
+      f.chiefComplaint.isNotEmpty ||
+      f.history != null ||
+      f.painScale != null ||
+      f.consciousnessLevel != null ||
+      f.pupils != null;
 
-  bool _hasVitalSigns(Map<String, dynamic> data) {
-    return data['blood_pressure'] != null ||
-        data['pulse'] != null ||
-        data['respiratory'] != null ||
-        data['temperature'] != null ||
-        data['spo2'] != null ||
-        data['blood_glucose'] != null ||
-        data['pupils'] != null;
-  }
+  bool _hasVitals(EStreetFormModel f) =>
+      f.bloodPressure != null ||
+      f.pulse != null ||
+      f.respiratory != null ||
+      f.temperature != null ||
+      f.spo2 != null ||
+      f.bloodGlucose != null;
 
-  bool _hasTreatment(Map<String, dynamic> data) {
-    return data['medications_given'] != null ||
-        data['iv_fluids'] != null ||
-        data['treatment_response'] != null ||
-        data['treatment_notes'] != null;
-  }
+  bool _hasTreatment(EStreetFormModel f) =>
+      f.aid.isNotEmpty ||
+      f.medicationsGiven != null ||
+      f.ivFluids != null ||
+      f.equipment.isNotEmpty ||
+      f.treatmentResponse != null ||
+      f.treatmentNotes != null;
 
-  bool _hasTransportInfo(Map<String, dynamic> data) {
-    return data['time_called'] != null ||
-        data['time_arrived_scene'] != null ||
-        data['time_departed_scene'] != null ||
-        data['time_arrived_hospital'] != null ||
-        data['transport_method'] != null;
-  }
+  bool _hasTransport(EStreetFormModel f) =>
+      f.timeCalled != null ||
+      f.timeArrivedScene != null ||
+      f.transportMethod != null ||
+      f.ambulanceType.isNotEmpty ||
+      f.primaryCrew != null ||
+      f.finalOutcome != null;
 
-  bool _hasCrewInfo(Map<String, dynamic> data) {
-    return data['primary_crew'] != null || data['secondary_crew'] != null;
-  }
+  bool _hasDoctor(EStreetFormModel f) =>
+      f.doctorName != null || f.licenseNumber != null || f.physicianReport != null;
+}
 
-  /// Enrich form model with locally saved image data.
-  /// The API may not store large base64 signatures/body diagram data,
-  /// so we load them from local file storage (saved during form submission).
-  Future<void> _enrichWithLocalImages(EStreetFormModel formModel) async {
+/// PDF action buttons that use the server-generated PDF.
+///
+/// - View: Opens in-app PDF viewer
+/// - Share: Downloads and shares the PDF file
+/// - Download: Downloads to device Downloads folder
+/// - Open in Browser: Opens the PDF URL in external browser
+class _ActionButtons extends StatefulWidget {
+  final String? pdfUrl;
+  final int incidentId;
+
+  const _ActionButtons({required this.pdfUrl, required this.incidentId});
+
+  @override
+  State<_ActionButtons> createState() => _ActionButtonsState();
+}
+
+class _ActionButtonsState extends State<_ActionButtons> {
+  bool _isLoading = false;
+  String? _localPath;
+
+  /// Downloads the PDF to a temp file and returns the local path.
+  Future<String?> _downloadPdf() async {
+    if (widget.pdfUrl == null) return null;
+    if (_localPath != null && File(_localPath!).existsSync()) {
+      return _localPath;
+    }
+
     try {
-      final localData = await EStreetLocalStorage.loadAllImages(incidentId);
-      
-      if (localData.isEmpty) {
-        print('⚠️ No locally saved images found for incident $incidentId');
-        return;
-      }
+      setState(() => _isLoading = true);
+      final dir = await getTemporaryDirectory();
+      final fileName = 'e_street_form_${widget.incidentId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final filePath = '${dir.path}/$fileName';
 
-      // Only fill in fields that are missing from the API data
-      if (formModel.patientSignature == null && localData['patient_signature'] != null) {
-        formModel.patientSignature = localData['patient_signature'] as String;
-        print('   📎 Loaded patient signature from local storage');
+      await Dio().download(widget.pdfUrl!, filePath);
+      _localPath = filePath;
+      return filePath;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e'), backgroundColor: AppColors.error),
+        );
       }
-      if (formModel.doctorSignature == null && localData['doctor_signature'] != null) {
-        formModel.doctorSignature = localData['doctor_signature'] as String;
-        print('   📎 Loaded doctor signature from local storage');
+      return null;
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _viewPdf() async {
+    if (widget.pdfUrl == null) {
+      _showNoPdfError();
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PdfViewerScreen(pdfUrl: widget.pdfUrl!)),
+    );
+  }
+
+  Future<void> _sharePdf() async {
+    if (widget.pdfUrl == null) {
+      _showNoPdfError();
+      return;
+    }
+    final path = await _downloadPdf();
+    if (path != null) {
+      await Share.shareXFiles([XFile(path)], text: 'E-Street Form #${widget.incidentId}');
+    }
+  }
+
+  Future<void> _savePdf() async {
+    if (widget.pdfUrl == null) {
+      _showNoPdfError();
+      return;
+    }
+    try {
+      setState(() => _isLoading = true);
+      final downloadsDir = Directory('/storage/emulated/0/Download');
+      if (!downloadsDir.existsSync()) {
+        downloadsDir.createSync(recursive: true);
       }
-      if (formModel.responderSignature == null && localData['responder_signature'] != null) {
-        formModel.responderSignature = localData['responder_signature'] as String;
-        print('   📎 Loaded responder signature from local storage');
-      }
-      if (formModel.bodyDiagramScreenshot == null && localData['body_diagram_screenshot'] != null) {
-        formModel.bodyDiagramScreenshot = localData['body_diagram_screenshot'] as String;
-        print('   📎 Loaded body diagram from local storage');
-      }
-      if (formModel.bodyObservations.isEmpty && localData['body_observations'] != null) {
-        try {
-          final obsStr = localData['body_observations'] as String;
-          final decoded = json.decode(obsStr);
-          if (decoded is Map) {
-            formModel.bodyObservations = decoded.map(
-              (k, v) => MapEntry(k.toString(), v.toString()),
-            );
-            print('   📎 Loaded ${formModel.bodyObservations.length} body observations from local storage');
-          }
-        } catch (e) {
-          print('   ⚠️ Error parsing body observations from local storage: $e');
-        }
+      final fileName = 'EStreet_Form_${widget.incidentId}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final destPath = '${downloadsDir.path}/$fileName';
+
+      await Dio().download(widget.pdfUrl!, destPath);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved to Downloads/$fileName')),
+        );
       }
     } catch (e) {
-      print('⚠️ Error enriching form model with local images: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _openInBrowser() async {
+    if (widget.pdfUrl == null) {
+      _showNoPdfError();
+      return;
+    }
+    final uri = Uri.parse(widget.pdfUrl!);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _showNoPdfError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('PDF not available. Submit the form first.'),
+        backgroundColor: AppColors.error,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.picture_as_pdf, size: 18),
+          tooltip: 'View PDF',
+          onPressed: _viewPdf,
+        ),
+        IconButton(
+          icon: const Icon(Icons.share, size: 18),
+          tooltip: 'Share PDF',
+          onPressed: _sharePdf,
+        ),
+        IconButton(
+          icon: const Icon(Icons.download, size: 18),
+          tooltip: 'Save to Downloads',
+          onPressed: _savePdf,
+        ),
+        IconButton(
+          icon: const Icon(Icons.open_in_browser, size: 18),
+          tooltip: 'Open in Browser',
+          onPressed: _openInBrowser,
+        ),
+      ],
+    );
   }
 }

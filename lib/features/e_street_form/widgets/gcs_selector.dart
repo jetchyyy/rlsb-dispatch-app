@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Glasgow Coma Scale selector with 3 dropdowns and real-time total.
+/// GCS (Glasgow Coma Scale) selector with 3 dropdowns.
+///
+/// Eye (1-4), Verbal (1-5), Motor (1-6) with computed total and severity label.
 class GcsSelector extends StatelessWidget {
   final int? eye;
   final int? verbal;
@@ -19,22 +21,23 @@ class GcsSelector extends StatelessWidget {
     required this.onMotorChanged,
   });
 
-  int get total => (eye ?? 0) + (verbal ?? 0) + (motor ?? 0);
+  int get _total => (eye ?? 0) + (verbal ?? 0) + (motor ?? 0);
+  bool get _hasValues => eye != null || verbal != null || motor != null;
 
-  String get totalLabel {
-    if (eye == null && verbal == null && motor == null) return '--';
-    final t = total;
-    if (t <= 8) return '$t (Severe)';
-    if (t <= 12) return '$t (Moderate)';
-    return '$t (Mild)';
+  String get _severityLabel {
+    if (!_hasValues) return '';
+    final t = _total;
+    if (t <= 8) return 'Severe';
+    if (t <= 12) return 'Moderate';
+    return 'Mild';
   }
 
-  Color get totalColor {
-    if (eye == null && verbal == null && motor == null) return Colors.grey;
-    final t = total;
+  Color get _severityColor {
+    if (!_hasValues) return Colors.grey;
+    final t = _total;
     if (t <= 8) return Colors.red;
     if (t <= 12) return Colors.orange;
-    return const Color(0xFF28A745);
+    return Colors.green;
   }
 
   @override
@@ -42,125 +45,70 @@ class GcsSelector extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Glasgow Coma Scale',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF424242),
-          ),
-        ),
+        const Text('Glasgow Coma Scale (GCS)',
+            style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: _buildDropdown(
-                label: 'Eye',
-                value: eye,
-                items: const {
-                  4: 'Spontaneous',
-                  3: 'To Voice',
-                  2: 'To Pain',
-                  1: 'None',
-                },
-                onChanged: onEyeChanged,
-              ),
-            ),
+            Expanded(child: _dropdown('Eye', eye, 4, onEyeChanged)),
             const SizedBox(width: 8),
-            Expanded(
-              child: _buildDropdown(
-                label: 'Verbal',
-                value: verbal,
-                items: const {
-                  5: 'Oriented',
-                  4: 'Confused',
-                  3: 'Words',
-                  2: 'Sounds',
-                  1: 'None',
-                },
-                onChanged: onVerbalChanged,
-              ),
-            ),
+            Expanded(child: _dropdown('Verbal', verbal, 5, onVerbalChanged)),
             const SizedBox(width: 8),
-            Expanded(
-              child: _buildDropdown(
-                label: 'Motor',
-                value: motor,
-                items: const {
-                  6: 'Obeys',
-                  5: 'Localizes',
-                  4: 'Withdraws',
-                  3: 'Flexion',
-                  2: 'Extension',
-                  1: 'None',
-                },
-                onChanged: onMotorChanged,
-              ),
-            ),
+            Expanded(child: _dropdown('Motor', motor, 6, onMotorChanged)),
           ],
         ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: totalColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: totalColor.withOpacity(0.3)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('GCS Total: ',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-              Text(
-                totalLabel,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: totalColor,
+        if (_hasValues) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _severityColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _severityColor.withOpacity(0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.assessment, size: 16, color: _severityColor),
+                const SizedBox(width: 6),
+                Text(
+                  'Total: $_total / 15 — $_severityLabel',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: _severityColor,
+                    fontSize: 13,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
 
-  Widget _buildDropdown({
-    required String label,
-    required int? value,
-    required Map<int, String> items,
-    required ValueChanged<int?> onChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        const SizedBox(height: 4),
-        DropdownButtonFormField<int>(
-          value: value,
-          isExpanded: true,
-          decoration: InputDecoration(
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          hint: const Text('--', style: TextStyle(fontSize: 12)),
-          items: items.entries
-              .map((e) => DropdownMenuItem(
-                    value: e.key,
-                    child: Text('${e.key}: ${e.value}',
-                        style: const TextStyle(fontSize: 11)),
-                  ))
-              .toList(),
-          onChanged: onChanged,
-        ),
+  Widget _dropdown(
+    String label,
+    int? value,
+    int max,
+    ValueChanged<int?> onChanged,
+  ) {
+    return DropdownButtonFormField<int>(
+      value: value,
+      decoration: InputDecoration(
+        labelText: label,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        isDense: true,
+      ),
+      items: [
+        const DropdownMenuItem<int>(value: null, child: Text('—')),
+        ...List.generate(max, (i) {
+          final v = i + 1;
+          return DropdownMenuItem(value: v, child: Text('$v'));
+        }),
       ],
+      onChanged: onChanged,
     );
   }
 }

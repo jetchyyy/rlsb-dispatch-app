@@ -9,11 +9,14 @@ import '../models/body_parts_data.dart';
 import 'body_diagram_painter.dart';
 import 'body_observation_dialog.dart';
 
-/// Interactive body diagram widget showing front + back views side-by-side.
-/// Tapping a region opens an observation dialog. Observed parts turn green.
+/// Interactive body diagram with front and back views.
+///
+/// Supports tapping body regions to add observations, tracks
+/// which parts have been documented, and can export a screenshot
+/// as a base64 data URI via [exportAsBase64].
 class EStreetBodyDiagramWidget extends StatefulWidget {
   final Map<String, String> observations;
-  final Future<void> Function(Map<String, String>) onObservationsChanged;
+  final ValueChanged<Map<String, String>> onObservationsChanged;
 
   const EStreetBodyDiagramWidget({
     super.key,
@@ -28,64 +31,64 @@ class EStreetBodyDiagramWidget extends StatefulWidget {
 
 class EStreetBodyDiagramWidgetState extends State<EStreetBodyDiagramWidget> {
   String? _tappedKey;
-  final GlobalKey _repaintKey = GlobalKey();
+  final _repaintBoundaryKey = GlobalKey();
 
-  /// Capture the body diagram as a base64-encoded PNG image
+  /// Capture the entire diagram (front + back) as a base64 data URI.
   Future<String?> exportAsBase64() async {
     try {
-      // Get the RenderRepaintBoundary
-      final boundary = _repaintKey.currentContext?.findRenderObject()
+      final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
           as RenderRepaintBoundary?;
       if (boundary == null) return null;
 
-      // Capture as image
       final image = await boundary.toImage(pixelRatio: 2.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return null;
 
-      // Convert to base64
-      final bytes = byteData.buffer.asUint8List();
-      return 'data:image/png;base64,${base64Encode(bytes)}';
-    } catch (e) {
-      print('❌ Error capturing body diagram: $e');
+      final pngBytes = byteData.buffer.asUint8List();
+      return 'data:image/png;base64,${base64Encode(pngBytes)}';
+    } catch (_) {
       return null;
     }
   }
 
-  void _onTap(TapUpDetails details, Size size, BodyPartView view) {
+  void _onTap(Offset localPosition, Size size, BodyPartView view) {
     final parts = BodyPartsData.getPartsForView(view);
 
-    // Test in reverse so smaller/top regions take priority
+    // Hit-test in reverse order (topmost first)
     for (final part in parts.reversed) {
       final path = part.createPath(size);
-      if (path.contains(details.localPosition)) {
-        setState(() => _tappedKey = part.key);
+      if (path.contains(localPosition)) {
         _showObservationDialog(part);
-        // Clear tap highlight after a short delay
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) setState(() => _tappedKey = null);
-        });
         return;
       }
     }
+
+    // Clear tapped state on background tap
+    setState(() => _tappedKey = null);
   }
 
   Future<void> _showObservationDialog(BodyPart part) async {
+    setState(() => _tappedKey = part.key);
+
     final result = await BodyObservationDialog.show(
       context,
       partLabel: part.label,
       currentObservation: widget.observations[part.key],
     );
 
-    if (result == null) return; // dismissed
+    if (!mounted) return;
 
-    final updated = Map<String, String>.from(widget.observations);
-    if (result.isEmpty) {
-      updated.remove(part.key);
-    } else {
-      updated[part.key] = result;
+    if (result != null) {
+      final updated = Map<String, String>.from(widget.observations);
+      if (result.isEmpty) {
+        updated.remove(part.key);
+      } else {
+        updated[part.key] = result;
+      }
+      widget.onObservationsChanged(updated);
     }
-    widget.onObservationsChanged(updated);
+
+    setState(() => _tappedKey = null);
   }
 
   @override
@@ -93,98 +96,102 @@ class EStreetBodyDiagramWidgetState extends State<EStreetBodyDiagramWidget> {
     final obsCount = widget.observations.length;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Header
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.accessibility_new, size: 20, color: Color(0xFF1976D2)),
-              const SizedBox(width: 8),
-              const Text(
-                'Body Injury Map',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              const Spacer(),
-              if (obsCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF28A745),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '$obsCount region${obsCount > 1 ? 's' : ''}',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
+        Row(
+          children: [
+            const Text(
+              'Body Diagram',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 8),
+            if (obsCount > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$obsCount',
+                  style: const TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
                   ),
                 ),
-            ],
-          ),
+              ),
+            const Spacer(),
+            const Text(
+              'Tap a region to add notes',
+              style: TextStyle(color: Colors.grey, fontSize: 11),
+            ),
+          ],
         ),
+        const SizedBox(height: 8),
 
-        // Side-by-side body diagrams
+        // Diagrams (front + back side by side)
         RepaintBoundary(
-          key: _repaintKey,
-          child: SizedBox(
-            height: 380,
+          key: _repaintBoundaryKey,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            padding: const EdgeInsets.all(8),
             child: Row(
               children: [
                 Expanded(child: _buildDiagram(BodyPartView.front)),
-                const SizedBox(width: 8),
+                Container(width: 1, height: 380, color: Colors.grey.shade200),
                 Expanded(child: _buildDiagram(BodyPartView.back)),
               ],
             ),
           ),
         ),
 
-        const SizedBox(height: 8),
-
         // Legend
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _legendDot(const Color(0x30607D8B), 'No Observation'),
-              const SizedBox(width: 16),
-              _legendDot(const Color(0xFF28A745), 'Has Observation'),
-              const SizedBox(width: 16),
-              _legendDot(const Color(0xFF007BFF), 'Selected'),
-            ],
-          ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _legendItem(Colors.grey.withOpacity(0.3), 'No Observation'),
+            const SizedBox(width: 16),
+            _legendItem(Colors.green.withOpacity(0.3), 'Has Observation'),
+            const SizedBox(width: 16),
+            _legendItem(Colors.blue.withOpacity(0.35), 'Selected'),
+          ],
         ),
       ],
     );
   }
 
   Widget _buildDiagram(BodyPartView view) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFAFAFA),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final size = Size(constraints.maxWidth, constraints.maxHeight);
-          return GestureDetector(
-            onTapUp: (details) => _onTap(details, size, view),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          onTapDown: (details) {
+            final size = Size(constraints.maxWidth, 380);
+            _onTap(details.localPosition, size, view);
+          },
+          child: SizedBox(
+            height: 380,
             child: CustomPaint(
-              size: size,
+              size: Size(constraints.maxWidth, 380),
               painter: BodyDiagramPainter(
                 view: view,
                 observations: widget.observations,
                 tappedKey: _tappedKey,
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _legendDot(Color color, String label) {
+  Widget _legendItem(Color color, String label) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -192,13 +199,13 @@ class EStreetBodyDiagramWidgetState extends State<EStreetBodyDiagramWidget> {
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.3),
-            border: Border.all(color: color, width: 1.5),
-            shape: BoxShape.circle,
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: Colors.grey.shade300),
           ),
         ),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
       ],
     );
   }

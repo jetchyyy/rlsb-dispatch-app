@@ -1,22 +1,25 @@
 import 'package:flutter/material.dart';
 
-/// Vital signs input grid — 2 columns × 3 rows.
+/// 2×3 grid of vital sign input fields.
+///
+/// Fields: Blood Pressure, Pulse, Respiratory Rate,
+///         Temperature, SpO₂, Blood Glucose
 class VitalSignsSection extends StatelessWidget {
   final TextEditingController bpController;
   final TextEditingController pulseController;
-  final TextEditingController respController;
-  final TextEditingController tempController;
+  final TextEditingController respiratoryController;
+  final TextEditingController temperatureController;
   final TextEditingController spo2Controller;
-  final TextEditingController glucoseController;
+  final TextEditingController bloodGlucoseController;
 
   const VitalSignsSection({
     super.key,
     required this.bpController,
     required this.pulseController,
-    required this.respController,
-    required this.tempController,
+    required this.respiratoryController,
+    required this.temperatureController,
     required this.spo2Controller,
-    required this.glucoseController,
+    required this.bloodGlucoseController,
   });
 
   @override
@@ -24,81 +27,73 @@ class VitalSignsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Vital Signs',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF424242),
-          ),
+        const Text('Vital Signs', style: TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _vitalField(
+                controller: bpController,
+                label: 'Blood Pressure',
+                hint: '120/80',
+                icon: Icons.favorite,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _vitalField(
+                controller: pulseController,
+                label: 'Pulse',
+                hint: 'bpm',
+                icon: Icons.monitor_heart,
+                keyboardType: TextInputType.number,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _buildField(
-                controller: bpController,
-                label: 'Blood Pressure',
-                hint: 'e.g. 120/80',
-                icon: Icons.favorite,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildField(
-                controller: pulseController,
-                label: 'Pulse (bpm)',
-                hint: 'e.g. 88',
-                icon: Icons.monitor_heart_outlined,
-                keyboardType: TextInputType.number,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildField(
-                controller: respController,
-                label: 'Respiratory (/min)',
-                hint: 'e.g. 18',
+              child: _vitalField(
+                controller: respiratoryController,
+                label: 'Respiratory',
+                hint: 'breaths/min',
                 icon: Icons.air,
                 keyboardType: TextInputType.number,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             Expanded(
-              child: _buildField(
-                controller: tempController,
-                label: 'Temperature (°C)',
-                hint: 'e.g. 36.8',
+              child: _vitalField(
+                controller: temperatureController,
+                label: 'Temperature',
+                hint: '°C',
                 icon: Icons.thermostat,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: TextInputType.number,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _buildField(
+              child: _vitalField(
                 controller: spo2Controller,
-                label: 'SpO₂ (%)',
-                hint: 'e.g. 97',
-                icon: Icons.opacity,
+                label: 'SpO₂',
+                hint: '%',
+                icon: Icons.bloodtype,
                 keyboardType: TextInputType.number,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
             Expanded(
-              child: _buildField(
-                controller: glucoseController,
+              child: _vitalField(
+                controller: bloodGlucoseController,
                 label: 'Blood Glucose',
                 hint: 'mg/dL',
-                icon: Icons.bloodtype,
+                icon: Icons.science,
                 keyboardType: TextInputType.number,
               ),
             ),
@@ -108,28 +103,24 @@ class VitalSignsSection extends StatelessWidget {
     );
   }
 
-  Widget _buildField({
+  Widget _vitalField({
     required TextEditingController controller,
     required String label,
     required String hint,
     required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
+    TextInputType? keyboardType,
   }) {
     return TextField(
       controller: controller,
-      keyboardType: keyboardType,
+      keyboardType: keyboardType ?? TextInputType.text,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(fontSize: 12),
         hintText: hint,
-        hintStyle: const TextStyle(fontSize: 12, color: Colors.grey),
         prefixIcon: Icon(icon, size: 18),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
       ),
-      style: const TextStyle(fontSize: 14),
     );
   }
 }

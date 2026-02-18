@@ -1,16 +1,13 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 
 import '../models/body_part.dart';
 import '../models/body_parts_data.dart';
 
-/// Draws the human body silhouette outline plus body-part regions.
+/// Custom painter that renders the body silhouette and tappable regions.
 ///
-/// Regions colored:
-///  - Default:     transparent fill, thin gray stroke
-///  - Tap/hover:   light blue fill + blue stroke
-///  - Observation:  light green fill + green stroke
+/// - Default region: light grey outline
+/// - Has observation: green fill
+/// - Currently tapped: blue fill
 class BodyDiagramPainter extends CustomPainter {
   final BodyPartView view;
   final Map<String, String> observations;
@@ -24,222 +21,185 @@ class BodyDiagramPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _drawBodyOutline(canvas, size);
+    _drawBodySilhouette(canvas, size);
     _drawRegions(canvas, size);
+    _drawViewLabel(canvas, size);
   }
 
-  // ── Body Outline (silhouette) ──────────────────────────────
-  void _drawBodyOutline(Canvas canvas, Size size) {
-    final sx = size.width / 300.0;
-    final sy = size.height / 500.0;
-
-    final outlinePaint = Paint()
-      ..color = const Color(0xFF607D8B)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0 * sx
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final skinFill = Paint()
-      ..color = const Color(0xFFF5E6D3)
+  void _drawBodySilhouette(Canvas canvas, Size size) {
+    final sx = size.width / 300;
+    final sy = size.height / 500;
+    final paint = Paint()
+      ..color = Colors.grey.shade300
       ..style = PaintingStyle.fill;
 
-    final path = Path();
+    final outlinePaint = Paint()
+      ..color = Colors.grey.shade400
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
 
-    // ── Head ──
-    path.addOval(Rect.fromCenter(
-      center: Offset(150 * sx, 48 * sy),
-      width: 62 * sx,
-      height: 70 * sy,
-    ));
+    // Head
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(150 * sx, 42 * sy),
+        width: 60 * sx,
+        height: 70 * sy,
+      ),
+      paint,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(
+        center: Offset(150 * sx, 42 * sy),
+        width: 60 * sx,
+        height: 70 * sy,
+      ),
+      outlinePaint,
+    );
 
-    // ── Neck ──
-    final neckPath = Path()
-      ..moveTo(138 * sx, 82 * sy)
-      ..lineTo(138 * sx, 100 * sy)
-      ..lineTo(162 * sx, 100 * sy)
-      ..lineTo(162 * sx, 82 * sy);
+    // Neck
+    canvas.drawRect(
+      Rect.fromLTWH(138 * sx, 74 * sy, 24 * sx, 24 * sy),
+      paint,
+    );
 
-    // ── Torso ──
-    final torsoPath = Path()
-      ..moveTo(100 * sx, 100 * sy)
-      ..cubicTo(95 * sx, 105 * sy, 90 * sx, 110 * sy, 92 * sx, 135 * sy)
-      ..cubicTo(92 * sx, 160 * sy, 95 * sx, 195 * sy, 105 * sx, 225 * sy)
-      ..lineTo(115 * sx, 250 * sy)
-      ..lineTo(150 * sx, 255 * sy)
-      ..lineTo(185 * sx, 250 * sy)
-      ..lineTo(195 * sx, 225 * sy)
-      ..cubicTo(205 * sx, 195 * sy, 208 * sx, 160 * sy, 208 * sx, 135 * sy)
-      ..cubicTo(210 * sx, 110 * sy, 205 * sx, 105 * sy, 200 * sx, 100 * sy)
-      ..lineTo(162 * sx, 100 * sy)
-      ..lineTo(138 * sx, 100 * sy)
+    // Torso
+    final torso = Path()
+      ..moveTo(110 * sx, 95 * sy)
+      ..cubicTo(100 * sx, 95 * sy, 85 * sx, 105 * sy, 85 * sx, 115 * sy)
+      ..lineTo(90 * sx, 195 * sy)
+      ..cubicTo(90 * sx, 215 * sy, 110 * sx, 230 * sy, 120 * sx, 230 * sy)
+      ..lineTo(180 * sx, 230 * sy)
+      ..cubicTo(190 * sx, 230 * sy, 210 * sx, 215 * sy, 210 * sx, 195 * sy)
+      ..lineTo(215 * sx, 115 * sy)
+      ..cubicTo(215 * sx, 105 * sy, 200 * sx, 95 * sy, 190 * sx, 95 * sy)
       ..close();
+    canvas.drawPath(torso, paint);
+    canvas.drawPath(torso, outlinePaint);
 
-    // ── Left Arm ──
+    // Left arm
     final leftArm = Path()
-      ..moveTo(100 * sx, 105 * sy)
-      ..cubicTo(85 * sx, 108 * sy, 78 * sx, 120 * sy, 72 * sx, 140 * sy)
-      ..cubicTo(66 * sx, 160 * sy, 60 * sx, 185 * sy, 55 * sx, 210 * sy)
-      ..cubicTo(50 * sx, 230 * sy, 48 * sx, 240 * sy, 48 * sx, 250 * sy)
-      ..cubicTo(44 * sx, 258 * sy, 42 * sx, 268 * sy, 48 * sx, 270 * sy)
-      ..cubicTo(54 * sx, 272 * sy, 60 * sx, 260 * sy, 64 * sx, 250 * sy)
-      ..cubicTo(68 * sx, 240 * sy, 72 * sx, 220 * sy, 78 * sx, 200 * sy)
-      ..cubicTo(84 * sx, 180 * sy, 88 * sx, 160 * sy, 92 * sx, 140 * sy)
-      ..cubicTo(96 * sx, 120 * sy, 100 * sx, 110 * sy, 100 * sx, 105 * sy);
-
-    // ── Right Arm ──
-    final rightArm = Path()
-      ..moveTo(200 * sx, 105 * sy)
-      ..cubicTo(215 * sx, 108 * sy, 222 * sx, 120 * sy, 228 * sx, 140 * sy)
-      ..cubicTo(234 * sx, 160 * sy, 240 * sx, 185 * sy, 245 * sx, 210 * sy)
-      ..cubicTo(250 * sx, 230 * sy, 252 * sx, 240 * sy, 252 * sx, 250 * sy)
-      ..cubicTo(256 * sx, 258 * sy, 258 * sx, 268 * sy, 252 * sx, 270 * sy)
-      ..cubicTo(246 * sx, 272 * sy, 240 * sx, 260 * sy, 236 * sx, 250 * sy)
-      ..cubicTo(232 * sx, 240 * sy, 228 * sx, 220 * sy, 222 * sx, 200 * sy)
-      ..cubicTo(216 * sx, 180 * sy, 212 * sx, 160 * sy, 208 * sx, 140 * sy)
-      ..cubicTo(204 * sx, 120 * sy, 200 * sx, 110 * sy, 200 * sx, 105 * sy);
-
-    // ── Left Leg ──
-    final leftLeg = Path()
-      ..moveTo(115 * sx, 250 * sy)
-      ..cubicTo(112 * sx, 270 * sy, 110 * sx, 300 * sy, 112 * sx, 330 * sy)
-      ..cubicTo(114 * sx, 350 * sy, 115 * sx, 370 * sy, 115 * sx, 400 * sy)
-      ..cubicTo(114 * sx, 420 * sy, 112 * sx, 435 * sy, 110 * sx, 448 * sy)
-      ..cubicTo(108 * sx, 455 * sy, 110 * sx, 460 * sy, 118 * sx, 460 * sy)
-      ..lineTo(142 * sx, 460 * sy)
-      ..cubicTo(148 * sx, 460 * sy, 150 * sx, 455 * sy, 148 * sx, 448 * sy)
-      ..cubicTo(146 * sx, 435 * sy, 144 * sx, 420 * sy, 143 * sx, 400 * sy)
-      ..cubicTo(143 * sx, 370 * sy, 144 * sx, 350 * sy, 145 * sx, 330 * sy)
-      ..cubicTo(146 * sx, 300 * sy, 148 * sx, 270 * sy, 150 * sx, 255 * sy);
-
-    // ── Right Leg ──
-    final rightLeg = Path()
-      ..moveTo(150 * sx, 255 * sy)
-      ..cubicTo(152 * sx, 270 * sy, 154 * sx, 300 * sy, 155 * sx, 330 * sy)
-      ..cubicTo(156 * sx, 350 * sy, 157 * sx, 370 * sy, 157 * sx, 400 * sy)
-      ..cubicTo(156 * sx, 420 * sy, 154 * sx, 435 * sy, 152 * sx, 448 * sy)
-      ..cubicTo(150 * sx, 455 * sy, 152 * sx, 460 * sy, 158 * sx, 460 * sy)
-      ..lineTo(190 * sx, 460 * sy)
-      ..cubicTo(196 * sx, 460 * sy, 198 * sx, 455 * sy, 196 * sx, 448 * sy)
-      ..cubicTo(194 * sx, 435 * sy, 190 * sx, 420 * sy, 188 * sx, 400 * sy)
-      ..cubicTo(187 * sx, 370 * sy, 186 * sx, 350 * sy, 188 * sx, 330 * sy)
-      ..cubicTo(190 * sx, 300 * sy, 188 * sx, 270 * sy, 185 * sx, 250 * sy);
-
-    // Draw body fill
-    canvas.drawPath(path, skinFill); // head
-    canvas.drawPath(neckPath, skinFill);
-    canvas.drawPath(torsoPath, skinFill);
-    canvas.drawPath(leftArm, skinFill);
-    canvas.drawPath(rightArm, skinFill);
-    canvas.drawPath(leftLeg, skinFill);
-    canvas.drawPath(rightLeg, skinFill);
-
-    // Draw outlines
-    canvas.drawPath(path, outlinePaint); // head
-    canvas.drawPath(neckPath, outlinePaint);
-    canvas.drawPath(torsoPath, outlinePaint);
+      ..moveTo(85 * sx, 110 * sy)
+      ..cubicTo(72 * sx, 110 * sy, 65 * sx, 120 * sy, 62 * sx, 135 * sy)
+      ..lineTo(52 * sx, 225 * sy)
+      ..cubicTo(48 * sx, 240 * sy, 47 * sx, 248 * sy, 50 * sx, 258 * sy)
+      ..lineTo(72 * sx, 258 * sy)
+      ..cubicTo(72 * sx, 248 * sy, 76 * sx, 235 * sy, 78 * sx, 225 * sy)
+      ..lineTo(88 * sx, 145 * sy)
+      ..close();
+    canvas.drawPath(leftArm, paint);
     canvas.drawPath(leftArm, outlinePaint);
+
+    // Right arm
+    final rightArm = Path()
+      ..moveTo(215 * sx, 110 * sy)
+      ..cubicTo(228 * sx, 110 * sy, 235 * sx, 120 * sy, 238 * sx, 135 * sy)
+      ..lineTo(248 * sx, 225 * sy)
+      ..cubicTo(252 * sx, 240 * sy, 253 * sx, 248 * sy, 250 * sx, 258 * sy)
+      ..lineTo(228 * sx, 258 * sy)
+      ..cubicTo(228 * sx, 248 * sy, 224 * sx, 235 * sy, 222 * sx, 225 * sy)
+      ..lineTo(212 * sx, 145 * sy)
+      ..close();
+    canvas.drawPath(rightArm, paint);
     canvas.drawPath(rightArm, outlinePaint);
+
+    // Left leg
+    final leftLeg = Path()
+      ..moveTo(120 * sx, 225 * sy)
+      ..cubicTo(115 * sx, 240 * sy, 112 * sx, 280 * sy, 114 * sx, 320 * sy)
+      ..lineTo(112 * sx, 420 * sy)
+      ..cubicTo(110 * sx, 440 * sy, 112 * sx, 450 * sy, 120 * sx, 452 * sy)
+      ..lineTo(148 * sx, 452 * sy)
+      ..cubicTo(148 * sx, 445 * sy, 144 * sx, 435 * sy, 142 * sx, 420 * sy)
+      ..lineTo(148 * sx, 320 * sy)
+      ..cubicTo(150 * sx, 280 * sy, 150 * sx, 240 * sy, 150 * sx, 225 * sy)
+      ..close();
+    canvas.drawPath(leftLeg, paint);
     canvas.drawPath(leftLeg, outlinePaint);
+
+    // Right leg
+    final rightLeg = Path()
+      ..moveTo(150 * sx, 225 * sy)
+      ..cubicTo(150 * sx, 240 * sy, 150 * sx, 280 * sy, 152 * sx, 320 * sy)
+      ..lineTo(158 * sx, 420 * sy)
+      ..cubicTo(156 * sx, 435 * sy, 152 * sx, 445 * sy, 152 * sx, 452 * sy)
+      ..lineTo(180 * sx, 452 * sy)
+      ..cubicTo(188 * sx, 450 * sy, 190 * sx, 440 * sy, 188 * sx, 420 * sy)
+      ..lineTo(186 * sx, 320 * sy)
+      ..cubicTo(188 * sx, 280 * sy, 185 * sx, 240 * sy, 180 * sx, 225 * sy)
+      ..close();
+    canvas.drawPath(rightLeg, paint);
     canvas.drawPath(rightLeg, outlinePaint);
 
-    // ── Face features (front view) ──
+    // Face features (front view only)
     if (view == BodyPartView.front) {
-      final featurePaint = Paint()
-        ..color = const Color(0xFF607D8B)
-        ..style = PaintingStyle.fill;
-
-      // Eyes
+      final eyePaint = Paint()..color = Colors.grey.shade500;
+      // Left eye
       canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(139 * sx, 42 * sy),
-          width: 6 * sx,
-          height: 4 * sy,
-        ),
-        featurePaint,
+        Rect.fromCenter(center: Offset(140 * sx, 38 * sy), width: 8 * sx, height: 5 * sy),
+        eyePaint,
       );
+      // Right eye
       canvas.drawOval(
-        Rect.fromCenter(
-          center: Offset(161 * sx, 42 * sy),
-          width: 6 * sx,
-          height: 4 * sy,
-        ),
-        featurePaint,
+        Rect.fromCenter(center: Offset(160 * sx, 38 * sy), width: 8 * sx, height: 5 * sy),
+        eyePaint,
       );
-
-      // Mouth line
-      final mouthPaint = Paint()
-        ..color = const Color(0xFF607D8B)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5 * sx;
-      canvas.drawLine(
-        Offset(143 * sx, 58 * sy),
-        Offset(157 * sx, 58 * sy),
-        mouthPaint,
+      // Mouth
+      final mouthPath = Path()
+        ..moveTo(143 * sx, 52 * sy)
+        ..quadraticBezierTo(150 * sx, 58 * sy, 157 * sx, 52 * sy);
+      canvas.drawPath(
+        mouthPath,
+        Paint()
+          ..color = Colors.grey.shade500
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.2,
       );
     }
-
-    // ── View label ──
-    final labelSpan = TextSpan(
-      text: view == BodyPartView.front ? 'FRONT' : 'BACK',
-      style: TextStyle(
-        color: const Color(0xFF90A4AE),
-        fontSize: 12 * sx,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 2,
-      ),
-    );
-    final tp = TextPainter(text: labelSpan, textDirection: ui.TextDirection.ltr)
-      ..layout();
-    tp.paint(canvas, Offset((size.width - tp.width) / 2, size.height - 18 * sy));
   }
 
-  // ── Tappable Regions ───────────────────────────────────────
   void _drawRegions(Canvas canvas, Size size) {
     final parts = BodyPartsData.getPartsForView(view);
 
     for (final part in parts) {
       final path = part.createPath(size);
-
       final hasObs = observations.containsKey(part.key);
       final isTapped = part.key == tappedKey;
 
       if (isTapped) {
-        // Tapped state: blue highlight
         canvas.drawPath(
           path,
-          Paint()
-            ..color = const Color(0x33007BFF)
-            ..style = PaintingStyle.fill,
+          Paint()..color = Colors.blue.withOpacity(0.35),
         );
         canvas.drawPath(
           path,
           Paint()
-            ..color = const Color(0xFF007BFF)
+            ..color = Colors.blue
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.0,
+            ..strokeWidth = 2,
         );
       } else if (hasObs) {
-        // Has observation: green
+        canvas.drawPath(
+          path,
+          Paint()..color = Colors.green.withOpacity(0.3),
+        );
         canvas.drawPath(
           path,
           Paint()
-            ..color = const Color(0x4D28A745)
+            ..color = Colors.green
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5,
+        );
+      } else {
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = Colors.grey.withOpacity(0.15)
             ..style = PaintingStyle.fill,
         );
         canvas.drawPath(
           path,
           Paint()
-            ..color = const Color(0xFF28A745)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.8,
-        );
-      } else {
-        // Default: subtle border
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = const Color(0x30607D8B)
+            ..color = Colors.grey.withOpacity(0.4)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 0.8,
         );
@@ -247,10 +207,27 @@ class BodyDiagramPainter extends CustomPainter {
     }
   }
 
+  void _drawViewLabel(Canvas canvas, Size size) {
+    final label = view == BodyPartView.front ? 'FRONT' : 'BACK';
+    final tp = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: Colors.grey.shade500,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 2,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset((size.width - tp.width) / 2, size.height - tp.height - 4));
+  }
+
   @override
   bool shouldRepaint(covariant BodyDiagramPainter old) {
-    return old.view != view ||
-        old.tappedKey != tappedKey ||
-        old.observations != observations;
+    return old.tappedKey != tappedKey ||
+        old.observations.length != observations.length ||
+        old.view != view;
   }
 }

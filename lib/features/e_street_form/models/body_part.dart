@@ -1,18 +1,30 @@
-import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui';
+import 'dart:typed_data';
 
-/// Represents a single tappable body region on the body diagram.
+/// Shape types supported by body region hit areas.
+enum BodyPartShape { ellipse, circle, rect, roundedRect }
+
+/// Which body view the part belongs to.
+enum BodyPartView { front, back }
+
+/// Describes a tappable body region with its geometry.
+///
+/// All coordinates are defined in a 300×500 reference space and scaled
+/// to the rendered size at draw time.
 class BodyPart {
   final String key;
   final String label;
   final BodyPartShape shape;
   final BodyPartView view;
 
-  // Shape parameters (in 300x500 coordinate space)
+  // Ellipse / circle params
   final double? cx, cy, rx, ry, r;
+
+  // Rect / roundedRect params
   final double? x, y, w, h, cornerRadius;
-  final double rotation; // degrees
+
+  // Optional rotation in degrees
+  final double? rotation;
 
   const BodyPart({
     required this.key,
@@ -29,74 +41,118 @@ class BodyPart {
     this.w,
     this.h,
     this.cornerRadius,
-    this.rotation = 0,
+    this.rotation,
   });
 
-  /// Create the Path for this body part, scaled to [size].
+  /// Creates a [Path] scaled to [size] from the 300×500 coordinate space.
   Path createPath(Size size) {
-    final sx = size.width / 300.0;
-    final sy = size.height / 500.0;
+    final sx = size.width / 300;
+    final sy = size.height / 500;
+    final path = Path();
 
     switch (shape) {
       case BodyPartShape.ellipse:
-        return Path()
-          ..addOval(Rect.fromCenter(
-            center: Offset(cx! * sx, cy! * sy),
+        final center = Offset(cx! * sx, cy! * sy);
+        final radii = Radius.elliptical(rx! * sx, ry! * sy);
+        if (rotation != null && rotation != 0) {
+          final rect = Rect.fromCenter(
+            center: Offset.zero,
             width: rx! * 2 * sx,
             height: ry! * 2 * sy,
-          ));
-      case BodyPartShape.circle:
-        return Path()
-          ..addOval(Rect.fromCircle(
-            center: Offset(cx! * sx, cy! * sy),
-            radius: r! * math.min(sx, sy),
-          ));
-      case BodyPartShape.rect:
-        return Path()
-          ..addRect(Rect.fromLTWH(
-            x! * sx,
-            y! * sy,
-            w! * sx,
-            h! * sy,
-          ));
-      case BodyPartShape.roundedRect:
-        final rect = Rect.fromLTWH(x! * sx, y! * sy, w! * sx, h! * sy);
-        final cr = (cornerRadius ?? 5) * math.min(sx, sy);
-        if (rotation != 0) {
-          final center = rect.center;
-          final rad = rotation * math.pi / 180.0;
-          final cosA = math.cos(rad);
-          final sinA = math.sin(rad);
-
-          // Build unrotated RRect centered at origin, then transform
-          final halfW = rect.width / 2;
-          final halfH = rect.height / 2;
-          final p = Path()
-            ..addRRect(RRect.fromRectAndRadius(
-              Rect.fromLTWH(-halfW, -halfH, rect.width, rect.height),
-              Radius.circular(cr),
-            ));
-
-          // Rotation + translation matrix
-          final matrix = Float64List(16);
-          matrix[0] = cosA;
-          matrix[1] = sinA;
-          matrix[4] = -sinA;
-          matrix[5] = cosA;
-          matrix[10] = 1;
+          );
+          final matrix = Float64List(16)
+            ..[0] = 1
+            ..[5] = 1
+            ..[10] = 1
+            ..[15] = 1;
+          // Apply rotation around center
+          final rad = rotation! * 3.14159265 / 180;
+          final cos = _cos(rad);
+          final sin = _sin(rad);
+          matrix[0] = cos;
+          matrix[1] = sin;
+          matrix[4] = -sin;
+          matrix[5] = cos;
           matrix[12] = center.dx;
           matrix[13] = center.dy;
-          matrix[15] = 1;
-
-          return p.transform(matrix);
-        } else {
-          return Path()
-            ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(cr)));
+          path.addOval(rect);
+          return path.transform(matrix);
         }
+        path.addOval(Rect.fromCenter(
+          center: center,
+          width: radii.x * 2,
+          height: radii.y * 2,
+        ));
+        break;
+
+      case BodyPartShape.circle:
+        path.addOval(Rect.fromCircle(
+          center: Offset(cx! * sx, cy! * sy),
+          radius: r! * sx,
+        ));
+        break;
+
+      case BodyPartShape.rect:
+        path.addRect(Rect.fromLTWH(
+          x! * sx,
+          y! * sy,
+          w! * sx,
+          h! * sy,
+        ));
+        break;
+
+      case BodyPartShape.roundedRect:
+        final rect = Rect.fromLTWH(x! * sx, y! * sy, w! * sx, h! * sy);
+        final cr = (cornerRadius ?? 4) * sx;
+        if (rotation != null && rotation != 0) {
+          final centeredRect = Rect.fromCenter(
+            center: Offset.zero,
+            width: w! * sx,
+            height: h! * sy,
+          );
+          path.addRRect(RRect.fromRectAndRadius(centeredRect, Radius.circular(cr)));
+          final rad = rotation! * 3.14159265 / 180;
+          final cos = _cos(rad);
+          final sin = _sin(rad);
+          final matrix = Float64List(16)
+            ..[0] = cos
+            ..[1] = sin
+            ..[4] = -sin
+            ..[5] = cos
+            ..[10] = 1
+            ..[15] = 1
+            ..[12] = (x! + w! / 2) * sx
+            ..[13] = (y! + h! / 2) * sy;
+          return path.transform(matrix);
+        }
+        path.addRRect(RRect.fromRectAndRadius(rect, Radius.circular(cr)));
+        break;
     }
+
+    return path;
+  }
+
+  static double _cos(double rad) {
+    // Use dart:math in practice; inline to avoid import
+    return _taylorCos(rad);
+  }
+
+  static double _sin(double rad) {
+    return _taylorSin(rad);
+  }
+
+  static double _taylorCos(double x) {
+    // Normalize to [-pi, pi]
+    while (x > 3.14159265) x -= 6.28318530;
+    while (x < -3.14159265) x += 6.28318530;
+    final x2 = x * x;
+    return 1 - x2 / 2 + x2 * x2 / 24 - x2 * x2 * x2 / 720;
+  }
+
+  static double _taylorSin(double x) {
+    while (x > 3.14159265) x -= 6.28318530;
+    while (x < -3.14159265) x += 6.28318530;
+    final x2 = x * x;
+    return x - x * x2 / 6 + x * x2 * x2 / 120 - x * x2 * x2 * x2 / 5040;
   }
 }
-
-enum BodyPartShape { ellipse, circle, rect, roundedRect }
-
-enum BodyPartView { front, back }

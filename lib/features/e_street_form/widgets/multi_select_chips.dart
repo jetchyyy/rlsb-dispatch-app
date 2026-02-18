@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// A reusable multi-select chip group widget.
-/// Used for skin assessment, aid provided, equipment, ambulance type, etc.
+/// Reusable multi-select chip group widget.
+///
+/// Displays a [Wrap] of [FilterChip] widgets. Selected items
+/// are highlighted in the primary color.
 class MultiSelectChips extends StatelessWidget {
   final String label;
   final List<String> options;
@@ -16,22 +18,25 @@ class MultiSelectChips extends StatelessWidget {
     required this.onChanged,
   });
 
+  void _toggle(String option) {
+    final updated = List<String>.from(selected);
+    if (updated.contains(option)) {
+      updated.remove(option);
+    } else {
+      updated.add(option);
+    }
+    onChanged(updated);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF424242),
-          ),
-        ),
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Wrap(
-          spacing: 6,
+          spacing: 8,
           runSpacing: 6,
           children: options.map((option) {
             final isSelected = selected.contains(option);
@@ -39,33 +44,15 @@ class MultiSelectChips extends StatelessWidget {
               label: Text(
                 option,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: isSelected ? Colors.white : const Color(0xFF424242),
+                  fontSize: 13,
+                  color: isSelected ? Colors.white : Colors.black87,
                 ),
               ),
               selected: isSelected,
-              onSelected: (val) {
-                final updated = List<String>.from(selected);
-                if (val) {
-                  updated.add(option);
-                } else {
-                  updated.remove(option);
-                }
-                onChanged(updated);
-              },
-              selectedColor: const Color(0xFF1976D2),
+              selectedColor: const Color(0xFF1e3a8a),
               checkmarkColor: Colors.white,
               backgroundColor: Colors.grey[100],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(
-                  color: isSelected
-                      ? const Color(0xFF1976D2)
-                      : Colors.grey[300]!,
-                ),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onSelected: (_) => _toggle(option),
             );
           }).toList(),
         ),

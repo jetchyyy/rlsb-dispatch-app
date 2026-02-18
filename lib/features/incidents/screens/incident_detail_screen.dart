@@ -912,6 +912,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         // ── E-Street Form Data ────────────────────────────
         EStreetFormDataDisplay(
           eStreetFormJson: incident['e_street_form'] as String?,
+          eStreetFormPdfPath: incident['e_street_form_pdf'] as String?,
           incidentId: widget.incidentId,
         ),
 
