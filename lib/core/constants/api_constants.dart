@@ -62,9 +62,15 @@ class ApiConstants {
   static const int sendTimeout = 30000;
 
   // Location Tracking Intervals
-  static const Duration passiveTrackingInterval = Duration(minutes: 5);
+  static const Duration passiveTrackingInterval = Duration(seconds: 10);
   static const Duration activeTrackingInterval = Duration(seconds: 5);
   static const Duration batchFlushInterval = Duration(seconds: 30);
+
+  // Location Accuracy Thresholds
+  /// Maximum acceptable GPS accuracy in meters. Positions with worse accuracy are rejected.
+  static const double maxAccuracyMeters = 50.0;
+  /// Minimum distance in meters before sending a new location update (prevents jitter).
+  static const double minDistanceMeters = 5.0;
 
   // Hive Box Names
   static const String locationQueueBox = 'location_queue';

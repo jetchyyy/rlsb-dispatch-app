@@ -1097,10 +1097,15 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   void _openInMaps(dynamic lat, dynamic lng) async {
-    final url =
-        Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    // Use geo: URI scheme for Android to open in Google Maps app
+    // This will open the location and allow navigation
+    final url = Uri.parse('geo:0,0?q=$lat,$lng(Incident Location)');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      // Fallback to web URL if geo: scheme not available
+      final webUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+      await launchUrl(webUrl, mode: LaunchMode.externalApplication);
     }
   }
 

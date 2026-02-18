@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/providers/location_tracking_provider.dart';
 
 class LiveMapScreen extends StatefulWidget {
   const LiveMapScreen({super.key});
@@ -17,14 +18,21 @@ class LiveMapScreen extends StatefulWidget {
 }
 
 class _LiveMapScreenState extends State<LiveMapScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   bool _showList = true;
   bool _mapReady = false;
+  double _currentZoom = _defaultZoom;
+  List<Marker>? _cachedMarkers; // Cache markers to avoid rebuilding
+  int _lastIncidentHash = 0; // Track if incidents changed
 
   // Animation controller for smooth transitions
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+
+  // Animation controller for flashing incident markers
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   // Default center: Surigao City (city proper)
   static const _defaultCenter = LatLng(9.7894, 125.4953);
@@ -64,6 +72,18 @@ class _LiveMapScreenState extends State<LiveMapScreen>
       curve: Curves.easeOut,
     );
 
+    // Setup pulse animation for incident markers
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+    _pulseAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _pulseController,
+        curve: Curves.easeInOut,
+      ),
+    );
+
     // Delay map readiness to prevent jitter
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<IncidentProvider>().fetchIncidents(silent: true);
@@ -74,16 +94,39 @@ class _LiveMapScreenState extends State<LiveMapScreen>
         }
       });
     });
+
+    // Listen to zoom changes to optimize animations
+    _mapController.mapEventStream.listen((event) {
+      if (event is MapEventMove || event is MapEventMoveEnd) {
+        final newZoom = _mapController.camera.zoom;
+        if ((newZoom - _currentZoom).abs() > 0.5) {
+          setState(() {
+            _currentZoom = newZoom;
+            _cachedMarkers = null; // Clear cache on zoom change
+          });
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _fadeController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
   List<Marker> _buildMarkers(List<Map<String, dynamic>> incidents) {
+    // Check if we can use cached markers
+    final incidentHash = incidents.length; // Simple hash based on count
+    if (_cachedMarkers != null && _lastIncidentHash == incidentHash) {
+      return _cachedMarkers!;
+    }
+
     final markers = <Marker>[];
+    final isZoomedIn = _currentZoom >= 13; // Only animate when zoomed in
+    final showIcons = _currentZoom >= 12; // Only show icons when zoomed in
+
     for (final inc in incidents) {
       // Only show active incidents (filter out resolved, closed, cancelled)
       final status = (inc['status'] ?? '').toString().toLowerCase();
@@ -106,34 +149,162 @@ class _LiveMapScreenState extends State<LiveMapScreen>
       markers.add(
         Marker(
           point: LatLng(lat, lng),
-          width: 36,
-          height: 36,
-          child: GestureDetector(
-            onTap: () => _showIncidentPopup(inc, color),
-            child: Container(
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.4),
-                    blurRadius: 6,
-                    spreadRadius: 1,
-                  ),
-                ],
-              ),
-              child: Icon(
-                _typeIcon(type),
-                color: Colors.white,
-                size: 16,
-              ),
+          width: isZoomedIn ? 48 : 24,
+          height: isZoomedIn ? 48 : 24,
+          child: RepaintBoundary(
+            child: GestureDetector(
+              onTap: () => _showIncidentPopup(inc, color),
+              child: isZoomedIn
+                  ? _buildAnimatedMarker(color, type, showIcons)
+                  : _buildSimpleMarker(color),
             ),
           ),
         ),
       );
     }
+
+    // Cache the markers
+    _lastIncidentHash = incidentHash;
+    _cachedMarkers = markers;
     return markers;
+  }
+
+  /// Build animated marker for zoomed-in view (zoom >= 13)
+  Widget _buildAnimatedMarker(Color color, String type, bool showIcons) {
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Pulsing outer ring
+            Container(
+              width: 48 * _pulseAnimation.value,
+              height: 48 * _pulseAnimation.value,
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.3 * _pulseAnimation.value),
+                shape: BoxShape.circle,
+              ),
+            ),
+            // Main marker (pre-built, not animated)
+            child!,
+          ],
+        );
+      },
+      // Pre-build the static marker child to avoid rebuilding it every frame
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.4),
+              blurRadius: 6,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: showIcons
+            ? Icon(
+                _typeIcon(type),
+                color: Colors.white,
+                size: 16,
+              )
+            : null,
+      ),
+    );
+  }
+
+  /// Build simple marker for zoomed-out view (zoom < 13)
+  Widget _buildSimpleMarker(Color color) {
+    return Container(
+      width: 16,
+      height: 16,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 1.5),
+      ),
+    );
+  }
+
+  /// Build user location marker (blue dot with accuracy circle)
+  Marker? _buildUserLocationMarker() {
+    final locationProvider = context.watch<LocationTrackingProvider>();
+    final position = locationProvider.lastPosition;
+
+    if (position == null) return null;
+
+    final lat = position.latitude;
+    final lng = position.longitude;
+
+    // Only show if within Surigao del Norte bounds
+    if (lat < _minLat || lat > _maxLat || lng < _minLng || lng > _maxLng) {
+      return null;
+    }
+
+    final isZoomedIn = _currentZoom >= 13;
+
+    return Marker(
+      point: LatLng(lat, lng),
+      width: isZoomedIn ? 60 : 30,
+      height: isZoomedIn ? 60 : 30,
+      child: RepaintBoundary(
+        child: isZoomedIn
+            ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Accuracy circle
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.blue.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  // User location dot with pulsing animation
+                  AnimatedBuilder(
+                    animation: _pulseAnimation,
+                    builder: (context, child) {
+                      return Container(
+                        width: 16 + (4 * _pulseAnimation.value),
+                        height: 16 + (4 * _pulseAnimation.value),
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.5 * _pulseAnimation.value),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              )
+            : Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+              ),
+      ),
+    );
   }
 
   double? _parseDouble(dynamic v) {
@@ -314,7 +485,27 @@ class _LiveMapScreenState extends State<LiveMapScreen>
       final status = (inc['status'] ?? '').toString().toLowerCase();
       return _activeStatuses.contains(status);
     }).toList();
+    
+    // Build markers (uses caching)
     final markers = _buildMarkers(incidents);
+    final userMarker = _buildUserLocationMarker();
+
+    // Combine incident markers with user location marker
+    final allMarkers = [...markers];
+    if (userMarker != null) {
+      allMarkers.add(userMarker);
+    }
+
+    // Pause animations when zoomed out for better performance
+    if (_currentZoom < 13) {
+      if (_pulseController.isAnimating) {
+        _pulseController.stop();
+      }
+    } else {
+      if (!_pulseController.isAnimating) {
+        _pulseController.repeat(reverse: true);
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -363,6 +554,8 @@ class _LiveMapScreenState extends State<LiveMapScreen>
                                 flags: InteractiveFlag.all,
                                 // Smooth zoom with scroll wheel velocity
                                 scrollWheelVelocity: 0.002,
+                                // Enable pinch move for smoother gestures
+                                enableMultiFingerGestureRace: true,
                               ),
                               onMapReady: () {
                                 // Fit to province bounds on first load
@@ -381,16 +574,17 @@ class _LiveMapScreenState extends State<LiveMapScreen>
                                 userAgentPackageName:
                                     'ph.inno.sdnpdrrmo.dispatch',
                                 maxZoom: 19,
-                                keepBuffer: 8,
-                                panBuffer: 3,
+                                // Optimize buffer sizes for better performance
+                                keepBuffer: 4, // Reduced from 8
+                                panBuffer: 2, // Reduced from 3
                                 // Smooth fade-in for tiles instead of instant pop
                                 tileDisplay: const TileDisplay.fadeIn(
-                                  duration: Duration(milliseconds: 150),
+                                  duration: Duration(milliseconds: 100), // Faster
                                 ),
                                 evictErrorTileStrategy: EvictErrorTileStrategy
                                     .notVisibleRespectMargin,
                               ),
-                              MarkerLayer(markers: markers),
+                              MarkerLayer(markers: allMarkers),
                             ],
                           ),
                         ),

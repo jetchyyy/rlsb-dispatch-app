@@ -238,15 +238,28 @@ class EStreetFormDataDisplay extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _handlePreviewPdf(context, data),
+                        icon: const Icon(Icons.preview, size: 20),
+                        label: const Text('Preview'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () => _handleSavePdf(context, data),
                         icon: const Icon(Icons.download, size: 20),
-                        label: const Text('Save as PDF'),
+                        label: const Text('Save'),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 12),
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: AppColors.success,
                           foregroundColor: Colors.white,
                         ),
                       ),
@@ -369,6 +382,53 @@ class EStreetFormDataDisplay extends StatelessWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving PDF: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _handlePreviewPdf(BuildContext context, Map<String, dynamic> formData) async {
+    try {
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Create form model and enrich with locally saved images
+      final formModel = EStreetFormModel.fromJson(formData);
+      await _enrichWithLocalImages(formModel);
+      
+      print('📝 Form model created for PDF preview...');
+      print('   Body diagram screenshot: ${formModel.bodyDiagramScreenshot != null ? "EXISTS (${formModel.bodyDiagramScreenshot!.length} chars)" : "NULL"}');
+      print('   Patient signature: ${formModel.patientSignature != null ? "EXISTS" : "NULL"}');
+      print('   Body observations: ${formModel.bodyObservations.length} entries');
+
+      // Close loading
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      // Show PDF preview
+      await EStreetPdfGenerator.printPdf(formModel, incidentId);
+    } catch (e) {
+      print('❌ Error previewing PDF: $e');
+      // Close loading if open
+      if (context.mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error previewing PDF: ${e.toString()}'),
             backgroundColor: AppColors.error,
             duration: const Duration(seconds: 4),
           ),

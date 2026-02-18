@@ -51,6 +51,7 @@ class LocationService {
   }
 
   /// Returns the current device position.
+  /// Forces a fresh GPS fix with a 10-second timeout to prevent stale/cached positions.
   Future<Position> getCurrentPosition() async {
     final hasPermission = await ensurePermission();
     if (!hasPermission) {
@@ -59,6 +60,8 @@ class LocationService {
 
     return await Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
+      forceAndroidLocationManager: true,  // Force GPS instead of network location
+      timeLimit: const Duration(seconds: 10),  // Prevent indefinite wait; get fresh fix
     );
   }
 

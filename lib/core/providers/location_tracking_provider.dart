@@ -161,6 +161,33 @@ class LocationTrackingProvider extends ChangeNotifier {
   Future<void> _capturePosition() async {
     try {
       final position = await _locationService.getCurrentPosition();
+
+      // ── Accuracy Filter ───────────────────────────────────────
+      // Reject positions with poor accuracy to prevent jumpy/inaccurate pings
+      if (position.accuracy > ApiConstants.maxAccuracyMeters) {
+        debugPrint(
+            '📍 ❌ Position rejected: accuracy ${position.accuracy.toStringAsFixed(1)}m > ${ApiConstants.maxAccuracyMeters}m threshold');
+        return;
+      }
+
+      // ── Distance Filter ───────────────────────────────────────
+      // Skip update if device hasn't moved enough (prevents jitter/noise)
+      if (_lastPosition != null) {
+        final distance = _locationService.distanceBetween(
+          _lastPosition!.latitude,
+          _lastPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        if (distance < ApiConstants.minDistanceMeters) {
+          debugPrint(
+              '📍 ⏭️  Position skipped: moved only ${distance.toStringAsFixed(1)}m < ${ApiConstants.minDistanceMeters}m threshold');
+          // Still update lastPosition timestamp but don't send to server
+          _lastPosition = position;
+          return;
+        }
+      }
+
       _lastPosition = position;
 
       final entry = <String, dynamic>{
@@ -171,13 +198,15 @@ class LocationTrackingProvider extends ChangeNotifier {
         'speed': position.speed,
         'heading': position.heading,
         'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
-        'captured_at': position.timestamp.toUtc().toIso8601String(),
+        'timestamp': position.timestamp.toUtc().toIso8601String(),
       };
       if (_activeIncidentId != null) {
         entry['incident_id'] = _activeIncidentId;
       }
 
-      debugPrint('📍 Captured: $entry');
+      debugPrint('📍 ✅ Captured: lat=${position.latitude.toStringAsFixed(6)}, '
+          'lng=${position.longitude.toStringAsFixed(6)}, '
+          'acc=${position.accuracy.toStringAsFixed(1)}m');
 
       // Try to send immediately
       try {
@@ -211,6 +240,12 @@ class LocationTrackingProvider extends ChangeNotifier {
         final raw = _offlineBox.getAt(i);
         if (raw == null) continue;
         final entry = jsonDecode(raw) as Map<String, dynamic>;
+        
+        // Migrate old 'captured_at' to 'timestamp' for backward compatibility
+        if (entry.containsKey('captured_at') && !entry.containsKey('timestamp')) {
+          entry['timestamp'] = entry.remove('captured_at');
+        }
+        
         await _api.post(
           '/location/update',
           data: entry,

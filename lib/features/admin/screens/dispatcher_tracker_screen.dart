@@ -140,7 +140,7 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
               icon: Icons.timer,
               iconColor: AppColors.info,
               children: const [
-                _InfoRow('Passive Interval', '5 minutes'),
+                _InfoRow('Passive Interval', '10 seconds'),
                 _InfoRow('Active Interval', '5 seconds'),
                 _InfoRow('Batch Flush Interval', '30 seconds'),
               ],
