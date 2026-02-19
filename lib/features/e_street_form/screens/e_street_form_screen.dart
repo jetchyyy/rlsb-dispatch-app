@@ -1,6 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/providers/incident_provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../models/e_street_form_model.dart';
@@ -12,7 +15,6 @@ import '../widgets/gcs_selector.dart';
 import '../widgets/multi_select_chips.dart';
 import '../widgets/signature_pad_widget.dart';
 import '../widgets/vital_signs_section.dart';
-import 'pdf_viewer_screen.dart';
 
 /// 5-step E-Street Form wizard.
 ///
@@ -103,15 +105,31 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
   @override
   void dispose() {
     for (final c in [
-      _nameCtrl, _ageCtrl, _addressCtrl, _emergencyContactCtrl,
-      _allergiesCtrl, _currentMedsCtrl, _medicalHistoryCtrl,
-      _chiefComplaintCtrl, _historyCtrl,
-      _bpCtrl, _pulseCtrl, _respiratoryCtrl, _temperatureCtrl,
-      _spo2Ctrl, _bloodGlucoseCtrl,
-      _medicationsGivenCtrl, _ivFluidsCtrl, _treatmentNotesCtrl,
-      _primaryCrewCtrl, _secondaryCrewCtrl,
-      _doctorNameCtrl, _licenseNumberCtrl, _physicianReportCtrl,
-      _hospitalOtherCtrl, _finalCommentsCtrl,
+      _nameCtrl,
+      _ageCtrl,
+      _addressCtrl,
+      _emergencyContactCtrl,
+      _allergiesCtrl,
+      _currentMedsCtrl,
+      _medicalHistoryCtrl,
+      _chiefComplaintCtrl,
+      _historyCtrl,
+      _bpCtrl,
+      _pulseCtrl,
+      _respiratoryCtrl,
+      _temperatureCtrl,
+      _spo2Ctrl,
+      _bloodGlucoseCtrl,
+      _medicationsGivenCtrl,
+      _ivFluidsCtrl,
+      _treatmentNotesCtrl,
+      _primaryCrewCtrl,
+      _secondaryCrewCtrl,
+      _doctorNameCtrl,
+      _licenseNumberCtrl,
+      _physicianReportCtrl,
+      _hospitalOtherCtrl,
+      _finalCommentsCtrl,
     ]) {
       c.dispose();
     }
@@ -134,7 +152,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       }
 
       // Merge local images
-      final localImages = await EStreetLocalStorage.loadAllImages(widget.incidentId);
+      final localImages =
+          await EStreetLocalStorage.loadAllImages(widget.incidentId);
       _form.patientSignature ??= localImages['patient_signature'];
       _form.doctorSignature ??= localImages['doctor_signature'];
       _form.responderSignature ??= localImages['responder_signature'];
@@ -157,7 +176,9 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     // Try to extract citizen data
     final citizen = data['citizen'] as Map<String, dynamic>?;
     if (citizen != null) {
-      _form.name = _str(citizen['first_name'], citizen['middle_name'], citizen['last_name']) ?? _form.name;
+      _form.name = _str(citizen['first_name'], citizen['middle_name'],
+              citizen['last_name']) ??
+          _form.name;
       _form.age = citizen['age']?.toString() ?? _form.age;
       _form.sex = citizen['sex']?.toString() ?? _form.sex;
       _form.address = citizen['address']?.toString() ?? _form.address;
@@ -168,13 +189,16 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     if (createdAt != null && _form.incidentDatetime == null) {
       try {
         final dt = DateTime.parse(createdAt).toLocal();
-        _form.incidentDatetime = '${dt.year}-${_pad(dt.month)}-${_pad(dt.day)}T${_pad(dt.hour)}:${_pad(dt.minute)}';
+        _form.incidentDatetime =
+            '${dt.year}-${_pad(dt.month)}-${_pad(dt.day)}T${_pad(dt.hour)}:${_pad(dt.minute)}';
       } catch (_) {}
     }
 
     // Try to load existing e_street_form JSON from the incident
     final eStreetJson = data['e_street_form'];
-    if (eStreetJson != null && eStreetJson is String && eStreetJson.isNotEmpty) {
+    if (eStreetJson != null &&
+        eStreetJson is String &&
+        eStreetJson.isNotEmpty) {
       try {
         final parsed = jsonDecode(eStreetJson);
         if (parsed is Map<String, dynamic>) {
@@ -321,15 +345,19 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     try {
       // Export signatures
       _form.patientSignature =
-          await _patientSigKey.currentState?.exportBase64() ?? _form.patientSignature;
+          await _patientSigKey.currentState?.exportBase64() ??
+              _form.patientSignature;
       _form.doctorSignature =
-          await _doctorSigKey.currentState?.exportBase64() ?? _form.doctorSignature;
+          await _doctorSigKey.currentState?.exportBase64() ??
+              _form.doctorSignature;
       _form.responderSignature =
-          await _responderSigKey.currentState?.exportBase64() ?? _form.responderSignature;
+          await _responderSigKey.currentState?.exportBase64() ??
+              _form.responderSignature;
 
       // Capture body diagram screenshot
       _form.bodyDiagramScreenshot =
-          await _bodyDiagramKey.currentState?.exportAsBase64() ?? _form.bodyDiagramScreenshot;
+          await _bodyDiagramKey.currentState?.exportAsBase64() ??
+              _form.bodyDiagramScreenshot;
 
       // Save images locally
       await EStreetLocalStorage.saveAllImages(
@@ -350,6 +378,17 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         form: _form,
       );
 
+      // Auto-resolve the incident
+      if (mounted) {
+        try {
+          await context
+              .read<IncidentProvider>()
+              .resolveIncident(widget.incidentId);
+        } catch (e) {
+          debugPrint('Failed to auto-resolve incident: $e');
+        }
+      }
+
       if (!mounted) return;
 
       final pdfUrl = result['pdf_url'] as String?;
@@ -362,8 +401,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           title: const Text('Form Submitted'),
           content: Text(
             pdfUrl != null
-                ? 'E-Street Form submitted successfully.\nPDF has been generated.'
-                : 'E-Street Form submitted successfully.',
+                ? 'E-Street Form submitted successfully.\nIncident marked as RESOLVED.\nPDF has been generated.'
+                : 'E-Street Form submitted successfully.\nIncident marked as RESOLVED.',
           ),
           actions: [
             if (pdfUrl != null)
@@ -371,19 +410,15 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                 icon: const Icon(Icons.picture_as_pdf),
                 label: const Text('View PDF'),
                 onPressed: () {
-                  Navigator.pop(ctx);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PdfViewerScreen(pdfUrl: pdfUrl),
-                    ),
-                  );
+                  Navigator.pop(ctx); // Close dialog
+                  // Return to detail screen with instruction to open PDF
+                  Navigator.pop(context, {'openPdf': pdfUrl});
                 },
               ),
             FilledButton(
               onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.pop(context);
+                Navigator.pop(ctx); // Close dialog
+                Navigator.pop(context); // Close screen
               },
               child: const Text('Done'),
             ),
@@ -392,7 +427,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      _showError('Submission failed: ${e.toString().replaceAll('Exception: ', '')}');
+      _showError(
+          'Submission failed: ${e.toString().replaceAll('Exception: ', '')}');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -407,7 +443,9 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
   }) async {
     DateTime initial = DateTime.now();
     if (initialValue != null && initialValue.isNotEmpty) {
-      try { initial = DateTime.parse(initialValue); } catch (_) {}
+      try {
+        initial = DateTime.parse(initialValue);
+      } catch (_) {}
     }
 
     final date = await showDatePicker(
@@ -427,7 +465,9 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
   }) async {
     DateTime initial = DateTime.now();
     if (initialValue != null && initialValue.isNotEmpty) {
-      try { initial = DateTime.parse(initialValue); } catch (_) {}
+      try {
+        initial = DateTime.parse(initialValue);
+      } catch (_) {}
     }
 
     final date = await showDatePicker(
@@ -444,7 +484,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     );
     if (time == null) return;
 
-    onPicked('${date.year}-${_pad(date.month)}-${_pad(date.day)}T${_pad(time.hour)}:${_pad(time.minute)}');
+    onPicked(
+        '${date.year}-${_pad(date.month)}-${_pad(date.day)}T${_pad(time.hour)}:${_pad(time.minute)}');
   }
 
   Future<void> _pickTime({
@@ -455,7 +496,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     if (initialValue != null && initialValue.isNotEmpty) {
       try {
         final parts = initialValue.split(':');
-        initial = TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+        initial =
+            TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
       } catch (_) {}
     }
 
@@ -530,7 +572,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                                 ? AppColors.success
                                 : Colors.grey.shade300,
                         child: isDone
-                            ? const Icon(Icons.check, size: 14, color: Colors.white)
+                            ? const Icon(Icons.check,
+                                size: 14, color: Colors.white)
                             : Text(
                                 '${i + 1}',
                                 style: TextStyle(
@@ -556,7 +599,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                     _stepLabels[i],
                     style: TextStyle(
                       fontSize: 10,
-                      fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isActive ? FontWeight.bold : FontWeight.normal,
                       color: isActive ? AppColors.primary : Colors.grey,
                     ),
                     textAlign: TextAlign.center,
@@ -578,7 +622,10 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, -2)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, -2)),
         ],
       ),
       child: Row(
@@ -591,7 +638,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                 label: const Text('Back'),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
             ),
@@ -606,7 +654,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   )
                 : FilledButton.icon(
@@ -615,14 +664,16 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.send, size: 18),
                     label: Text(_isSubmitting ? 'Submitting…' : 'Submit Form'),
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.success,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
           ),
@@ -633,12 +684,18 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
   Widget _buildCurrentStep() {
     switch (_currentStep) {
-      case 0: return _buildStep0PatientInfo();
-      case 1: return _buildStep1Assessment();
-      case 2: return _buildStep2Treatment();
-      case 3: return _buildStep3Transport();
-      case 4: return _buildStep4Signatures();
-      default: return const SizedBox.shrink();
+      case 0:
+        return _buildStep0PatientInfo();
+      case 1:
+        return _buildStep1Assessment();
+      case 2:
+        return _buildStep2Treatment();
+      case 3:
+        return _buildStep3Transport();
+      case 4:
+        return _buildStep4Signatures();
+      default:
+        return const SizedBox.shrink();
     }
   }
 
@@ -658,16 +715,20 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
             padding: const EdgeInsets.only(bottom: 12),
             child: OutlinedButton.icon(
               onPressed: () {
-                final citizen = widget.incidentData!['citizen'] as Map<String, dynamic>;
+                final citizen =
+                    widget.incidentData!['citizen'] as Map<String, dynamic>;
                 setState(() {
-                  _nameCtrl.text = _str(citizen['first_name'], citizen['middle_name'], citizen['last_name']) ?? '';
+                  _nameCtrl.text = _str(citizen['first_name'],
+                          citizen['middle_name'], citizen['last_name']) ??
+                      '';
                   _ageCtrl.text = citizen['age']?.toString() ?? '';
                   _form.sex = citizen['sex']?.toString();
                   _addressCtrl.text = citizen['address']?.toString() ?? '';
                 });
               },
               icon: const Icon(Icons.person_pin, size: 16),
-              label: const Text('Recall Citizen Info', style: TextStyle(fontSize: 12)),
+              label: const Text('Recall Citizen Info',
+                  style: TextStyle(fontSize: 12)),
             ),
           ),
 
@@ -676,7 +737,9 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
         Row(
           children: [
-            Expanded(child: _textField(_ageCtrl, 'Age', icon: Icons.cake, keyboardType: TextInputType.number)),
+            Expanded(
+                child: _textField(_ageCtrl, 'Age',
+                    icon: Icons.cake, keyboardType: TextInputType.number)),
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<String>(
@@ -692,7 +755,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         ),
         const SizedBox(height: 12),
 
-        _textField(_addressCtrl, 'Address', icon: Icons.location_on, maxLines: 2),
+        _textField(_addressCtrl, 'Address',
+            icon: Icons.location_on, maxLines: 2),
         const SizedBox(height: 12),
 
         // Date of Birth
@@ -720,13 +784,17 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         ),
         const SizedBox(height: 12),
 
-        _textField(_emergencyContactCtrl, 'Emergency Contact', icon: Icons.phone),
+        _textField(_emergencyContactCtrl, 'Emergency Contact',
+            icon: Icons.phone),
         const SizedBox(height: 12),
-        _textField(_allergiesCtrl, 'Allergies', icon: Icons.warning_amber, maxLines: 2),
+        _textField(_allergiesCtrl, 'Allergies',
+            icon: Icons.warning_amber, maxLines: 2),
         const SizedBox(height: 12),
-        _textField(_currentMedsCtrl, 'Current Medications', icon: Icons.medication, maxLines: 2),
+        _textField(_currentMedsCtrl, 'Current Medications',
+            icon: Icons.medication, maxLines: 2),
         const SizedBox(height: 12),
-        _textField(_medicalHistoryCtrl, 'Medical History', icon: Icons.history, maxLines: 2),
+        _textField(_medicalHistoryCtrl, 'Medical History',
+            icon: Icons.history, maxLines: 2),
       ],
     );
   }
@@ -741,9 +809,11 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       children: [
         _stepHeader('Medical Assessment', Icons.medical_services),
 
-        _textField(_chiefComplaintCtrl, 'Chief Complaint *', icon: Icons.report_problem, maxLines: 2),
+        _textField(_chiefComplaintCtrl, 'Chief Complaint *',
+            icon: Icons.report_problem, maxLines: 2),
         const SizedBox(height: 12),
-        _textField(_historyCtrl, 'History of Present Illness', icon: Icons.description, maxLines: 2),
+        _textField(_historyCtrl, 'History of Present Illness',
+            icon: Icons.description, maxLines: 2),
         const SizedBox(height: 16),
 
         // Pain Scale
@@ -752,8 +822,10 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
             Expanded(
               child: DropdownButtonFormField<int>(
                 value: _form.painScale,
-                decoration: _inputDeco('Pain Scale (0-10)', icon: Icons.sentiment_very_dissatisfied),
-                items: List.generate(11, (i) => DropdownMenuItem(value: i, child: Text('$i'))),
+                decoration: _inputDeco('Pain Scale (0-10)',
+                    icon: Icons.sentiment_very_dissatisfied),
+                items: List.generate(
+                    11, (i) => DropdownMenuItem(value: i, child: Text('$i'))),
                 onChanged: (v) => setState(() => _form.painScale = v),
               ),
             ),
@@ -842,7 +914,6 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _stepHeader('Treatment & Interventions', Icons.healing),
-
         MultiSelectChips(
           label: 'Aid Provided',
           options: EStreetFormModel.aidOptions,
@@ -850,12 +921,11 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           onChanged: (v) => setState(() => _form.aid = v),
         ),
         const SizedBox(height: 16),
-
-        _textField(_medicationsGivenCtrl, 'Medications Given', icon: Icons.medication, maxLines: 2),
+        _textField(_medicationsGivenCtrl, 'Medications Given',
+            icon: Icons.medication, maxLines: 2),
         const SizedBox(height: 12),
         _textField(_ivFluidsCtrl, 'IV Fluids', icon: Icons.water_drop),
         const SizedBox(height: 16),
-
         MultiSelectChips(
           label: 'Equipment Used',
           options: EStreetFormModel.equipmentOptions,
@@ -863,7 +933,6 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           onChanged: (v) => setState(() => _form.equipment = v),
         ),
         const SizedBox(height: 16),
-
         DropdownButtonFormField<String>(
           value: _form.treatmentResponse,
           decoration: _inputDeco('Treatment Response', icon: Icons.trending_up),
@@ -873,8 +942,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           onChanged: (v) => setState(() => _form.treatmentResponse = v),
         ),
         const SizedBox(height: 12),
-
-        _textField(_treatmentNotesCtrl, 'Treatment Notes', icon: Icons.notes, maxLines: 3),
+        _textField(_treatmentNotesCtrl, 'Treatment Notes',
+            icon: Icons.notes, maxLines: 3),
       ],
     );
   }
@@ -890,16 +959,19 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         _stepHeader('Transport & Outcome', Icons.local_shipping),
 
         // Time pickers
-        const Text('Response Times', style: TextStyle(fontWeight: FontWeight.w600)),
+        const Text('Response Times',
+            style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _timeTile('Time Called', _form.timeCalled, (v) => setState(() => _form.timeCalled = v)),
+              child: _timeTile('Time Called', _form.timeCalled,
+                  (v) => setState(() => _form.timeCalled = v)),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _timeTile('Arrived Scene', _form.timeArrivedScene, (v) => setState(() => _form.timeArrivedScene = v)),
+              child: _timeTile('Arrived Scene', _form.timeArrivedScene,
+                  (v) => setState(() => _form.timeArrivedScene = v)),
             ),
           ],
         ),
@@ -907,11 +979,13 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         Row(
           children: [
             Expanded(
-              child: _timeTile('Departed Scene', _form.timeDepartedScene, (v) => setState(() => _form.timeDepartedScene = v)),
+              child: _timeTile('Departed Scene', _form.timeDepartedScene,
+                  (v) => setState(() => _form.timeDepartedScene = v)),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _timeTile('At Hospital', _form.timeArrivedHospital, (v) => setState(() => _form.timeArrivedHospital = v)),
+              child: _timeTile('At Hospital', _form.timeArrivedHospital,
+                  (v) => setState(() => _form.timeArrivedHospital = v)),
             ),
           ],
         ),
@@ -927,7 +1001,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
         DropdownButtonFormField<String>(
           value: _form.transportMethod,
-          decoration: _inputDeco('Transport Method', icon: Icons.transfer_within_a_station),
+          decoration: _inputDeco('Transport Method',
+              icon: Icons.transfer_within_a_station),
           items: EStreetFormModel.transportMethodOptions
               .map((s) => DropdownMenuItem(value: s, child: Text(s)))
               .toList(),
@@ -941,9 +1016,10 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           decoration: _inputDeco('Hospital', icon: Icons.local_hospital),
           isExpanded: true,
           items: [
-            ...EStreetFormModel.hospitalOptions
-                .map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis))),
-            const DropdownMenuItem(value: 'OTHER', child: Text('OTHER (specify below)')),
+            ...EStreetFormModel.hospitalOptions.map((s) => DropdownMenuItem(
+                value: s, child: Text(s, overflow: TextOverflow.ellipsis))),
+            const DropdownMenuItem(
+                value: 'OTHER', child: Text('OTHER (specify below)')),
           ],
           onChanged: (v) => setState(() => _form.hospital = v),
         ),
@@ -963,11 +1039,13 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
         _textField(_primaryCrewCtrl, 'Primary Crew', icon: Icons.person),
         const SizedBox(height: 12),
-        _textField(_secondaryCrewCtrl, 'Secondary Crew', icon: Icons.person_outline),
+        _textField(_secondaryCrewCtrl, 'Secondary Crew',
+            icon: Icons.person_outline),
         const SizedBox(height: 16),
 
         // Final Outcome — radio
-        const Text('Final Outcome', style: TextStyle(fontWeight: FontWeight.w600)),
+        const Text('Final Outcome',
+            style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         ...EStreetFormModel.finalOutcomeOptions.map((option) {
           return RadioListTile<String>(
@@ -983,11 +1061,13 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
         // Receiving Physician
         _sectionDivider('Receiving Physician'),
-        _textField(_doctorNameCtrl, 'Doctor Name', icon: Icons.medical_information),
+        _textField(_doctorNameCtrl, 'Doctor Name',
+            icon: Icons.medical_information),
         const SizedBox(height: 12),
         _textField(_licenseNumberCtrl, 'License Number', icon: Icons.badge),
         const SizedBox(height: 12),
-        _textField(_physicianReportCtrl, 'Physician Report', icon: Icons.description, maxLines: 3),
+        _textField(_physicianReportCtrl, 'Physician Report',
+            icon: Icons.description, maxLines: 3),
       ],
     );
   }
@@ -1023,7 +1103,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         ),
         const SizedBox(height: 20),
 
-        _textField(_finalCommentsCtrl, 'Final Comments', icon: Icons.comment, maxLines: 3),
+        _textField(_finalCommentsCtrl, 'Final Comments',
+            icon: Icons.comment, maxLines: 3),
         const SizedBox(height: 24),
 
         // Summary
@@ -1036,13 +1117,15 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.info_outline, color: AppColors.primary, size: 20),
+              const Icon(Icons.info_outline,
+                  color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
                   'All fields are optional. Submit what you have — '
                   'the form can be updated later.',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  style:
+                      TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
               ),
             ],
@@ -1144,7 +1227,8 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: const Icon(Icons.access_time, size: 18),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
           isDense: true,
         ),
