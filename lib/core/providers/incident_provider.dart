@@ -78,6 +78,7 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Computed Stats ─────────────────────────────────────────
 
+  /// All non-terminal incidents (not resolved, closed, or cancelled)
   int get activeCount =>
       _statistics?['active_incidents'] ??
       _incidents
@@ -85,21 +86,29 @@ class IncidentProvider extends ChangeNotifier {
               .contains((i['status'] ?? '').toString().toLowerCase()))
           .length;
 
-  int get criticalCount =>
-      _statistics?['critical_incidents'] ??
-      _incidents
-          .where((i) =>
-              (i['severity'] ?? '').toString().toLowerCase() == 'critical')
-          .length;
-
-  int get newCount =>
-      _statistics?['new_incidents'] ??
+  /// Reported but not yet acted on — needs dispatcher attention
+  int get pendingCount =>
+      _statistics?['pending_incidents'] ??
       _incidents
           .where(
               (i) => (i['status'] ?? '').toString().toLowerCase() == 'reported')
           .length;
 
-  int get todayTotal => _statistics?['today_total'] ?? _incidents.length;
+  /// Acknowledged, responding, or on-scene — being handled
+  int get dispatchedCount =>
+      _statistics?['dispatched_incidents'] ??
+      _incidents
+          .where((i) => ['acknowledged', 'responding', 'on_scene', 'on-scene']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length;
+
+  /// Resolved or closed — completed
+  int get resolvedCount =>
+      _statistics?['resolved_incidents'] ??
+      _incidents
+          .where((i) => ['resolved', 'closed']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length;
 
   // ── Auto-refresh ───────────────────────────────────────────
 
@@ -150,7 +159,7 @@ class IncidentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Map<String, dynamic> _buildQueryParams({int? page, int limit = 1200}) {
+  Map<String, dynamic> _buildQueryParams({int? page, int limit = 15}) {
     final params = <String, dynamic>{'limit': limit, 'page': page ?? 1};
     if (_statusFilter != null) params['status'] = _statusFilter;
     if (_severityFilter != null) params['severity'] = _severityFilter;
@@ -178,24 +187,64 @@ class IncidentProvider extends ChangeNotifier {
     }
 
     // Compute stats from local data
+    int totalResponseSeconds = 0;
+    int respondedCount = 0;
+
+    for (final inc in _incidents) {
+      if (inc['responded_at'] != null && inc['on_scene_at'] != null) {
+        try {
+          final start = DateTime.parse(inc['responded_at'].toString());
+          final end = DateTime.parse(inc['on_scene_at'].toString());
+          final diff = end.difference(start).inSeconds;
+          if (diff > 0) {
+            totalResponseSeconds += diff;
+            respondedCount++;
+          }
+        } catch (e) {
+          debugPrint('  ⚠️ Error parsing dates for incident ${inc['id']}: $e');
+        }
+      }
+    }
+
+    final avgSeconds = respondedCount > 0
+        ? (totalResponseSeconds / respondedCount).round()
+        : 0;
+
     _statistics = {
       'active_incidents': _incidents
           .where((i) => !['resolved', 'closed', 'cancelled']
               .contains((i['status'] ?? '').toString().toLowerCase()))
           .length,
-      'critical_incidents': _incidents
-          .where((i) =>
-              (i['severity'] ?? '').toString().toLowerCase() == 'critical')
-          .length,
-      'new_incidents': _incidents
+      'pending_incidents': _incidents
           .where(
               (i) => (i['status'] ?? '').toString().toLowerCase() == 'reported')
           .length,
-      'today_total': _incidents.length,
+      'dispatched_incidents': _incidents
+          .where((i) => ['acknowledged', 'responding', 'on_scene', 'on-scene']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length,
+      'resolved_incidents': _incidents
+          .where((i) => ['resolved', 'closed']
+              .contains((i['status'] ?? '').toString().toLowerCase()))
+          .length,
+      'average_response_time': _formatDuration(Duration(seconds: avgSeconds)),
     };
 
     debugPrint('  📊 Stats: $_statistics');
     notifyListeners();
+  }
+
+  String _formatDuration(Duration duration) {
+    if (duration.inSeconds == 0) return 'N/A';
+    if (duration.inDays > 0) {
+      return '${duration.inDays}d ${duration.inHours.remainder(24)}h';
+    } else if (duration.inHours > 0) {
+      return '${duration.inHours}h ${duration.inMinutes.remainder(60)}m';
+    } else if (duration.inMinutes > 0) {
+      return '${duration.inMinutes}m';
+    } else {
+      return '${duration.inSeconds}s';
+    }
   }
 
   // ── Fetch All Incidents ────────────────────────────────────
@@ -508,7 +557,8 @@ class IncidentProvider extends ChangeNotifier {
     final success = await _performAction(
         id, 'respond', ApiConstants.incidentRespond(id), notes);
     if (success) {
-      debugPrint('📍 Respond succeeded — triggering active GPS tracking for incident #$id');
+      debugPrint(
+          '📍 Respond succeeded — triggering active GPS tracking for incident #$id');
       onRespondStarted?.call(id);
     }
     return success;
@@ -518,7 +568,8 @@ class IncidentProvider extends ChangeNotifier {
     final success = await _performAction(
         id, 'on-scene', ApiConstants.incidentOnScene(id), notes);
     if (success) {
-      debugPrint('📍 On-scene succeeded — notifying response provider for incident #$id');
+      debugPrint(
+          '📍 On-scene succeeded — notifying response provider for incident #$id');
       onOnSceneReached?.call(id);
     }
     return success;

@@ -72,6 +72,7 @@ dependencies:
   # Serialization
   json_annotation: ^4.8.1
   audioplayers: ^6.5.1
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:

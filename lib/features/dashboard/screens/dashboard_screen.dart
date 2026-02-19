@@ -6,6 +6,8 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/services/geocoding_service.dart';
+import '../../../core/services/tts_service.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import '../widgets/map_preview_card.dart';
 
@@ -18,12 +20,21 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
+  // Services for Smart Alerts
+  late final GeocodingService _geocodingService;
+  late final TtsService _ttsService;
+  bool _isAlerting = false;
+
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
+    _geocodingService = GeocodingService();
+    _ttsService = TtsService();
+    _ttsService.init();
+
     _fadeController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -33,13 +44,17 @@ class _DashboardScreenState extends State<DashboardScreen>
       curve: Curves.easeOut,
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = context.read<AuthProvider>();
       if (auth.isAuthenticated) {
         final provider = context.read<IncidentProvider>();
+
+        // Subscribe to new incident alarms
+        provider.alarmService.onNewIncidents = _handleNewIncidents;
+
         // Clear filters and fetch all incidents for stats calculation
         provider.clearFilters();
-        provider.fetchIncidents();
+        await provider.fetchIncidents();
         provider.fetchStatistics();
         provider.startAutoRefresh();
       }
@@ -47,10 +62,206 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  void _handleNewIncidents(List<Map<String, dynamic>> newIncidents) async {
+    if (!mounted || newIncidents.isEmpty || _isAlerting) return;
+
+    _isAlerting = true;
+    final incident = newIncidents.first; // Handle the first one for now
+    final lat = _parseDouble(incident['latitude']);
+    final lng = _parseDouble(incident['longitude']);
+    String locationText = 'Unknown location';
+
+    // 1. Fetch Address (Reverse Geocoding)
+    if (lat != null && lng != null) {
+      final address = await _geocodingService.getAddress(lat, lng);
+      if (address != null) locationText = address;
+    }
+
+    // 2. Prepare TTS Message
+    final type = (incident['incident_type'] ?? incident['type'] ?? 'Emergency')
+        .toString()
+        .replaceAll('_', ' ');
+    final severity = (incident['severity'] ?? 'High').toString();
+    final speech =
+        "Emergency! New $type incident at $locationText. Severity $severity.";
+
+    // 3. Setup TTS Loop & Speak
+    _ttsService.setCompletionHandler(() {
+      if (_isAlerting && mounted) {
+        // Wait 1.5s then repeat
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (_isAlerting && mounted) {
+            _ttsService.speak(speech);
+          }
+        });
+      }
+    });
+
+    // Ensure volume is up for TTS
+    await _ttsService.speak(speech);
+
+    // 4. Show Visual Alert
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _buildAlertModal(ctx, incident, locationText),
+      ).then((_) {
+        _isAlerting = false;
+        // Stop everything
+        _ttsService.stop();
+        _ttsService.setCompletionHandler(() {}); // Clear handler
+        context.read<IncidentProvider>().alarmService.stopAlarm();
+      });
+    }
+  }
+
+  double? _parseDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
   @override
   void dispose() {
     _fadeController.dispose();
+    _ttsService.stop();
+    // note: we don't dispose services as they are lightweight, but we should clear the callback
+    // context.read<IncidentProvider>().alarmService.onNewIncidents = null; // Can't easily access context here
     super.dispose();
+  }
+
+  Widget _buildAlertModal(
+      BuildContext ctx, Map<String, dynamic> incident, String address) {
+    final type = (incident['incident_type'] ?? incident['type'] ?? 'Emergency')
+        .toString()
+        .toUpperCase()
+        .replaceAll('_', ' ');
+    final severity =
+        (incident['severity'] ?? 'medium').toString().toLowerCase();
+    final color = AppColors.incidentSeverityColor(severity);
+
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: EdgeInsets.zero,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Colors.white, size: 48),
+                const SizedBox(height: 8),
+                const Text(
+                  'NEW INCIDENT ALERT',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Body
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Text(
+                  type,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade800,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    severity.toUpperCase(),
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.location_on,
+                        color: Colors.grey.shade500, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        address,
+                        style: const TextStyle(fontSize: 15, height: 1.4),
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Actions
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey.shade600,
+                    ),
+                    child: const Text('DISMISS'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      final id = incident['id'];
+                      if (id != null) context.push('/incidents/$id');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('VIEW'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -159,7 +370,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildHeader(dynamic user, IncidentProvider ip) {
     return SliverAppBar(
-      expandedHeight: 150,
+      expandedHeight: 260,
       floating: false,
       pinned: true,
       stretch: true,
@@ -294,40 +505,216 @@ class _DashboardScreenState extends State<DashboardScreen>
               color: const Color(0xFFEF4444),
               isLoading: ip.isLoading,
               pulse: ip.activeCount > 0,
+              onTap: () => _showFilteredIncidentsModal(
+                context,
+                title: 'Active Incidents',
+                color: const Color(0xFFEF4444),
+                icon: Icons.radio_button_checked_rounded,
+                incidents: ip.incidents
+                    .where((i) => !['resolved', 'closed', 'cancelled']
+                        .contains((i['status'] ?? '').toString().toLowerCase()))
+                    .toList(),
+              ),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _StatTile(
-              label: 'New',
-              value: ip.newCount,
-              icon: Icons.fiber_new_rounded,
+              label: 'Pending',
+              value: ip.pendingCount,
+              icon: Icons.hourglass_top_rounded,
               color: const Color(0xFFF97316),
               isLoading: ip.isLoading,
-              pulse: ip.newCount > 0,
+              pulse: ip.pendingCount > 0,
+              onTap: () => _showFilteredIncidentsModal(
+                context,
+                title: 'Pending Incidents',
+                color: const Color(0xFFF97316),
+                icon: Icons.hourglass_top_rounded,
+                incidents: ip.incidents
+                    .where((i) =>
+                        (i['status'] ?? '').toString().toLowerCase() ==
+                        'reported')
+                    .toList(),
+              ),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _StatTile(
-              label: 'Critical',
-              value: ip.criticalCount,
-              icon: Icons.warning_amber_rounded,
-              color: const Color(0xFFDC2626),
-              isLoading: ip.isLoading,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _StatTile(
-              label: 'Total',
-              value: ip.todayTotal,
-              icon: Icons.assessment_outlined,
+              label: 'Dispatched',
+              value: ip.dispatchedCount,
+              icon: Icons.local_shipping_rounded,
               color: const Color(0xFF3B82F6),
               isLoading: ip.isLoading,
+              onTap: () => _showFilteredIncidentsModal(
+                context,
+                title: 'Dispatched Incidents',
+                color: const Color(0xFF3B82F6),
+                icon: Icons.local_shipping_rounded,
+                incidents: ip.incidents
+                    .where((i) => [
+                          'acknowledged',
+                          'responding',
+                          'on_scene',
+                          'on-scene'
+                        ].contains(
+                            (i['status'] ?? '').toString().toLowerCase()))
+                    .toList(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _StatTile(
+              label: 'Resolved',
+              value: ip.resolvedCount,
+              icon: Icons.check_circle_outline_rounded,
+              color: const Color(0xFF22C55E),
+              isLoading: ip.isLoading,
+              onTap: () => _showFilteredIncidentsModal(
+                context,
+                title: 'Resolved Incidents',
+                color: const Color(0xFF22C55E),
+                icon: Icons.check_circle_outline_rounded,
+                incidents: ip.incidents
+                    .where((i) => ['resolved', 'closed']
+                        .contains((i['status'] ?? '').toString().toLowerCase()))
+                    .toList(),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // FILTERED INCIDENTS MODAL
+  // ═══════════════════════════════════════════════════════════
+
+  void _showFilteredIncidentsModal(
+    BuildContext context, {
+    required String title,
+    required Color color,
+    required IconData icon,
+    required List<Map<String, dynamic>> incidents,
+  }) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              // Drag handle
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(icon, color: color, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1E293B),
+                            ),
+                          ),
+                          Text(
+                            '${incidents.length} incident${incidents.length == 1 ? '' : 's'}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded,
+                          color: Colors.grey.shade400, size: 22),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: Colors.grey.shade200),
+              // Incident list
+              Expanded(
+                child: incidents.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.inbox_rounded,
+                                size: 48, color: Colors.grey.shade300),
+                            const SizedBox(height: 8),
+                            Text(
+                              'No incidents',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade400,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        controller: scrollController,
+                        padding: EdgeInsets.zero,
+                        itemCount: incidents.length,
+                        separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Colors.grey.shade100,
+                        ),
+                        itemBuilder: (_, i) => _IncidentRow(
+                          incident: incidents[i],
+                          onTap: () {
+                            Navigator.of(ctx).pop();
+                            final id = incidents[i]['id'];
+                            if (id != null) context.push('/incidents/$id');
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -522,9 +909,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 // Body
                 if (ip.isLoading && ip.incidents.isEmpty)
                   _buildLoadingShimmer()
-                else if (ip.incidents.where((i) => 
-                    !['resolved', 'closed', 'cancelled']
-                        .contains((i['status'] ?? '').toString().toLowerCase())).isEmpty)
+                else if (ip.incidents
+                    .where((i) => !['resolved', 'closed', 'cancelled']
+                        .contains((i['status'] ?? '').toString().toLowerCase()))
+                    .isEmpty)
                   _buildEmptyState()
                 else
                   _buildIncidentList(ip),
@@ -593,11 +981,14 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildIncidentList(IncidentProvider ip) {
     // Filter to show only active incidents (exclude resolved, closed, cancelled)
-    final activeIncidents = ip.incidents.where((incident) {
-      final status = (incident['status'] ?? '').toString().toLowerCase();
-      return !['resolved', 'closed', 'cancelled'].contains(status);
-    }).take(5).toList();
-    
+    final activeIncidents = ip.incidents
+        .where((incident) {
+          final status = (incident['status'] ?? '').toString().toLowerCase();
+          return !['resolved', 'closed', 'cancelled'].contains(status);
+        })
+        .take(5)
+        .toList();
+
     return Column(
       children: [
         for (int i = 0; i < activeIncidents.length; i++) ...[
@@ -618,7 +1009,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       ],
     );
   }
-
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -632,6 +1022,7 @@ class _StatTile extends StatefulWidget {
   final Color color;
   final bool isLoading;
   final bool pulse;
+  final VoidCallback? onTap;
 
   const _StatTile({
     required this.label,
@@ -640,6 +1031,7 @@ class _StatTile extends StatefulWidget {
     required this.color,
     this.isLoading = false,
     this.pulse = false,
+    this.onTap,
   });
 
   @override
@@ -683,67 +1075,70 @@ class _StatTileState extends State<_StatTile>
       animation: _pulse,
       builder: (context, child) {
         // AdminLTE Small-Box Style
-        return Container(
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: widget.color,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Stack(
-            children: [
-              // Watermark Icon
-              Positioned(
-                right: -8,
-                bottom: -8,
-                child: Icon(
-                  widget.icon,
-                  size: 64,
-                  color: Colors.white.withOpacity(0.15),
+        return GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: widget.color,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Stack(
+              children: [
+                // Watermark Icon
+                Positioned(
+                  right: -8,
+                  bottom: -8,
+                  child: Icon(
+                    widget.icon,
+                    size: 64,
+                    color: Colors.white.withOpacity(0.15),
+                  ),
                 ),
-              ),
-              // Content
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Value
-                    widget.isLoading
-                        ? const SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+                // Content
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Value
+                      widget.isLoading
+                          ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              '${widget.value}',
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                height: 1,
+                              ),
                             ),
-                          )
-                        : Text(
-                            '${widget.value}',
-                            style: const TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              height: 1,
-                            ),
-                          ),
-                    const SizedBox(height: 4),
-                    // Label
-                    Text(
-                      widget.label.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withOpacity(0.9),
-                        letterSpacing: 0.5,
+                      const SizedBox(height: 4),
+                      // Label
+                      Text(
+                        widget.label.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white.withOpacity(0.9),
+                          letterSpacing: 0.5,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

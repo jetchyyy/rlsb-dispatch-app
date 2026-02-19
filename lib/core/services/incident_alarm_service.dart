@@ -33,7 +33,8 @@ class IncidentAlarmService {
       if (id != null) _knownIncidentIds.add(id);
     }
     _initialLoadDone = true;
-    debugPrint('🔔 IncidentAlarmService: seeded ${_knownIncidentIds.length} known IDs');
+    debugPrint(
+        '🔔 IncidentAlarmService: seeded ${_knownIncidentIds.length} known IDs');
   }
 
   /// Compare incoming incidents against known IDs.
@@ -59,9 +60,11 @@ class IncidentAlarmService {
     }
 
     if (newOnes.isNotEmpty) {
-      debugPrint('🚨 IncidentAlarmService: ${newOnes.length} NEW incident(s) detected!');
+      debugPrint(
+          '🚨 IncidentAlarmService: ${newOnes.length} NEW incident(s) detected!');
       for (final inc in newOnes) {
-        debugPrint('   → id=${inc['id']} type=${inc['incident_type']} severity=${inc['severity']}');
+        debugPrint(
+            '   → id=${inc['id']} type=${inc['incident_type']} severity=${inc['severity']}');
       }
       _triggerAlarm();
       onNewIncidents?.call(newOnes);
@@ -73,7 +76,8 @@ class IncidentAlarmService {
     try {
       _isPlaying = true;
       await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.setVolume(1.0);
+      // Volume low (0.05) so Text-to-Speech can be heard clearly over it
+      await _player.setVolume(0.05);
       await _player.play(AssetSource('sounds/alarm.wav'));
       debugPrint('🔊 Alarm started');
     } catch (e) {

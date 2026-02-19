@@ -31,8 +31,8 @@ enum TrackingMode {
 /// • **Offline queue** — unsent updates are persisted in a Hive box and
 ///   retried automatically on the next flush cycle.
 class LocationTrackingProvider extends ChangeNotifier {
-    // Public method to force flush the offline queue (for admin/manual use)
-    // (Implementation is below; this stub is removed)
+  // Public method to force flush the offline queue (for admin/manual use)
+  // (Implementation is below; this stub is removed)
   final ApiClient _api;
   final LocationService _locationService;
   final Box<String> _offlineBox;
@@ -84,6 +84,11 @@ class LocationTrackingProvider extends ChangeNotifier {
   }
 
   // ── Public API ─────────────────────────────────────────────
+
+  /// Stream of real-time position updates (for UI/Map).
+  /// Uses a small distance filter (2m) for smooth movement on map.
+  Stream<Position> get locationStream =>
+      _locationService.getPositionStream(distanceFilter: 2);
 
   /// Begin passive tracking (every 5 minutes). Call after login.
   Future<void> startPassiveTracking() async {
@@ -238,7 +243,8 @@ class LocationTrackingProvider extends ChangeNotifier {
         );
         debugPrint('📍 Location sent to /location/update');
       } on DioException catch (e) {
-        debugPrint('📍 Upload failed (${e.response?.statusCode}): ${e.message}');
+        debugPrint(
+            '📍 Upload failed (${e.response?.statusCode}): ${e.message}');
         // Save to offline queue for retry
         _offlineBox.add(jsonEncode(entry));
       } catch (e) {
@@ -262,12 +268,13 @@ class LocationTrackingProvider extends ChangeNotifier {
         final raw = _offlineBox.getAt(i);
         if (raw == null) continue;
         final entry = jsonDecode(raw) as Map<String, dynamic>;
-        
+
         // Migrate old 'captured_at' to 'timestamp' for backward compatibility
-        if (entry.containsKey('captured_at') && !entry.containsKey('timestamp')) {
+        if (entry.containsKey('captured_at') &&
+            !entry.containsKey('timestamp')) {
           entry['timestamp'] = entry.remove('captured_at');
         }
-        
+
         await _api.post(
           '/location/update',
           data: entry,
@@ -275,7 +282,8 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('📍 Flushed offline location: $entry');
         failed.add(i);
       } on DioException catch (e) {
-        debugPrint('📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
+        debugPrint(
+            '📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
       } catch (e) {
         debugPrint('📍 Offline upload error: $e');
       }

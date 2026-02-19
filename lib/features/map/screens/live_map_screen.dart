@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math; // For rotation calculations
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart'; // Import for Position
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +11,7 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../../core/providers/location_tracking_provider.dart';
+import '../../../core/services/routing_service.dart';
 
 class LiveMapScreen extends StatefulWidget {
   const LiveMapScreen({super.key});
@@ -20,11 +23,24 @@ class LiveMapScreen extends StatefulWidget {
 class _LiveMapScreenState extends State<LiveMapScreen>
     with TickerProviderStateMixin {
   final MapController _mapController = MapController();
+  final RoutingService _routingService = RoutingService();
+
+  // Real-time tracking state
+  StreamSubscription<Position>? _positionSubscription;
+  Position? _currentPosition;
+  bool _isNavigating = false;
+  double _currentHeading = 0.0;
+
   bool _showList = true;
   bool _mapReady = false;
   double _currentZoom = _defaultZoom;
   List<Marker>? _cachedMarkers; // Cache markers to avoid rebuilding
   int _lastIncidentHash = 0; // Track if incidents changed
+
+  // Navigation State
+  List<LatLng> _routePoints = [];
+  Map<String, dynamic>? _routeStats;
+  bool _isFetchingRoute = false;
 
   // Animation controller for smooth transitions
   late AnimationController _fadeController;
@@ -37,6 +53,7 @@ class _LiveMapScreenState extends State<LiveMapScreen>
   // Default center: Surigao City (city proper)
   static const _defaultCenter = LatLng(9.7894, 125.4953);
   static const _defaultZoom = 12.0;
+  static const _navZoom = 18.0; // Zoom level for navigation mode
 
   // Province boundaries
   static const _minLat = 9.4;
@@ -87,6 +104,8 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     // Delay map readiness to prevent jitter
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<IncidentProvider>().fetchIncidents(silent: true);
+      _subscribeToLocationUpdates();
+
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) {
           setState(() => _mapReady = true);
@@ -99,6 +118,15 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     _mapController.mapEventStream.listen((event) {
       if (event is MapEventMove || event is MapEventMoveEnd) {
         final newZoom = _mapController.camera.zoom;
+
+        // If user manually moves map while navigating, stop navigation
+        if (_isNavigating &&
+            (event.source == MapEventSource.onDrag ||
+                event.source == MapEventSource.custom)) {
+          // Optional: Auto-disable navigation on manual drag
+          // setState(() => _isNavigating = false);
+        }
+
         if ((newZoom - _currentZoom).abs() > 0.5) {
           setState(() {
             _currentZoom = newZoom;
@@ -109,8 +137,67 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     });
   }
 
+  void _subscribeToLocationUpdates() {
+    final locationProvider = context.read<LocationTrackingProvider>();
+
+    // Subscribe to the high-frequency stream
+    _positionSubscription = locationProvider.locationStream.listen((position) {
+      if (!mounted) return;
+
+      setState(() {
+        _currentPosition = position;
+        _currentHeading = position.heading;
+      });
+
+      // If navigation mode is active, lock camera to user
+      if (_isNavigating && _mapController.camera.zoom >= 3) {
+        _updateCameraForNavigation(position);
+      }
+    });
+  }
+
+  void _updateCameraForNavigation(Position position) {
+    // Smoothly move camera center
+    _mapController.move(
+        LatLng(position.latitude, position.longitude),
+        math.max(_mapController.camera.zoom,
+            _navZoom) // Keep current zoom or snap to nav zoom
+        );
+
+    // Rotate map if moving fast enough to have reliable heading
+    if (position.speed > 1.0) {
+      // Speed > 1 m/s (~3.6 km/h)
+      _mapController.rotate(-position.heading);
+    }
+  }
+
+  void _toggleNavigation() {
+    if (_currentPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Waiting for location...')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isNavigating = !_isNavigating;
+      if (_isNavigating) {
+        _showList = false; // Hide list to give full view
+
+        // Initial move to start navigation
+        final pos = _currentPosition!;
+        _animatedMove(LatLng(pos.latitude, pos.longitude), _navZoom,
+            rotation: -pos.heading);
+      } else {
+        // Reset rotation when stopping navigation
+        _mapController.rotate(0);
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _positionSubscription?.cancel();
     _fadeController.dispose();
     _pulseController.dispose();
     super.dispose();
@@ -231,10 +318,11 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     );
   }
 
-  /// Build user location marker (blue dot with accuracy circle)
+  /// Build user location marker (blue arrow with accuracy circle)
   Marker? _buildUserLocationMarker() {
-    final locationProvider = context.watch<LocationTrackingProvider>();
-    final position = locationProvider.lastPosition;
+    // Use the streamed position if available, otherwise fall back to provider's last known
+    final position = _currentPosition ??
+        context.watch<LocationTrackingProvider>().lastPosition;
 
     if (position == null) return null;
 
@@ -257,41 +345,49 @@ class _LiveMapScreenState extends State<LiveMapScreen>
             ? Stack(
                 alignment: Alignment.center,
                 children: [
-                  // Accuracy circle
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.blue.withOpacity(0.3),
-                        width: 1,
+                  // Navigation cone / Heading indicator
+                  if (_isNavigating)
+                    // Map rotates to match heading, so "Up" on screen is always our heading.
+                    const Icon(Icons.navigation, color: Colors.blue, size: 30)
+                  else
+                    // Accuracy circle
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.blue.withOpacity(0.3),
+                          width: 1,
+                        ),
                       ),
                     ),
-                  ),
-                  // User location dot with pulsing animation
-                  AnimatedBuilder(
-                    animation: _pulseAnimation,
-                    builder: (context, child) {
-                      return Container(
-                        width: 16 + (4 * _pulseAnimation.value),
-                        height: 16 + (4 * _pulseAnimation.value),
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.blue.withOpacity(0.5 * _pulseAnimation.value),
-                              blurRadius: 8,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+
+                  // User location dot with pulsing animation (only if not navigating)
+                  if (!_isNavigating)
+                    AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Container(
+                          width: 16 + (4 * _pulseAnimation.value),
+                          height: 16 + (4 * _pulseAnimation.value),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.blue
+                                    .withOpacity(0.5 * _pulseAnimation.value),
+                                blurRadius: 8,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                 ],
               )
             : Container(
@@ -313,6 +409,80 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     if (v is int) return v.toDouble();
     if (v is String) return double.tryParse(v);
     return null;
+  }
+
+  // ── Navigation Logic ───────────────────────────────────────
+
+  String _formatDuration(double seconds) {
+    if (seconds < 60) return '${seconds.round()} sec';
+    final minutes = (seconds / 60).round();
+    if (minutes < 60) return '$minutes min';
+    final hours = (minutes / 60).floor();
+    final mins = minutes % 60;
+    return '${hours}h ${mins}m';
+  }
+
+  String _formatDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m';
+    return '${(meters / 1000).toStringAsFixed(1)} km';
+  }
+
+  Future<void> _startNavigationTo(double lat, double lng) async {
+    final start = _currentPosition != null
+        ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+        : context.read<LocationTrackingProvider>().lastPosition != null
+            ? LatLng(
+                context.read<LocationTrackingProvider>().lastPosition!.latitude,
+                context
+                    .read<LocationTrackingProvider>()
+                    .lastPosition!
+                    .longitude)
+            : null;
+
+    if (start == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Waiting for your location...')),
+      );
+      return;
+    }
+
+    setState(() => _isFetchingRoute = true);
+
+    // Close bottom sheet if open
+    Navigator.pop(context);
+
+    final end = LatLng(lat, lng);
+    final routeData = await _routingService.getRoute(start, end);
+
+    if (mounted) {
+      setState(() {
+        _isFetchingRoute = false;
+        if (routeData != null && routeData['points'] != null) {
+          final pointsList = routeData['points'] as List;
+          _routePoints = pointsList.map((e) => e as LatLng).toList();
+          _routeStats = routeData;
+          _isNavigating = true; // Turn on navigation mode
+          _showList = false;
+
+          // Animate to start
+          _animatedMove(start, 18.0, rotation: -(_currentHeading));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not find a route.')),
+          );
+        }
+      });
+    }
+  }
+
+  void _stopNavigation() {
+    setState(() {
+      _isNavigating = false;
+      _routePoints = [];
+      _routeStats = null;
+      _mapController.rotate(0); // Reset rotation to North
+      _fitBounds(context.read<IncidentProvider>().incidents); // Reset view
+    });
   }
 
   void _showIncidentPopup(Map<String, dynamic> inc, Color color) {
@@ -385,16 +555,41 @@ class _LiveMapScreenState extends State<LiveMapScreen>
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  if (id != null) context.push('/incidents/$id');
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('View Details'),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        // Navigator.pop(context);
+                        final lat = _parseDouble(inc['latitude']);
+                        final lng = _parseDouble(inc['longitude']);
+                        if (lat != null && lng != null) {
+                          _startNavigationTo(lat, lng);
+                        }
+                      },
+                      icon: const Icon(Icons.navigation, size: 16),
+                      label: const Text('Navigate'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        if (id != null) context.push('/incidents/$id');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('View Details'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -417,6 +612,9 @@ class _LiveMapScreenState extends State<LiveMapScreen>
   }
 
   void _fitBounds(List<Map<String, dynamic>> incidents) {
+    if (_isNavigating)
+      setState(() => _isNavigating = false); // Stop nav if fitting bounds
+
     final points = <LatLng>[];
     for (final inc in incidents) {
       final lat = _parseDouble(inc['latitude']);
@@ -448,13 +646,16 @@ class _LiveMapScreenState extends State<LiveMapScreen>
   }
 
   /// Smoothly animate the map camera to a new position
-  void _animatedMove(LatLng destLocation, double destZoom) {
+  void _animatedMove(LatLng destLocation, double destZoom, {double? rotation}) {
     final camera = _mapController.camera;
     final latTween = Tween<double>(
         begin: camera.center.latitude, end: destLocation.latitude);
     final lngTween = Tween<double>(
         begin: camera.center.longitude, end: destLocation.longitude);
     final zoomTween = Tween<double>(begin: camera.zoom, end: destZoom);
+    final rotateTween = rotation != null
+        ? Tween<double>(begin: camera.rotation, end: rotation)
+        : null;
 
     final controller = AnimationController(
         duration: const Duration(milliseconds: 500), vsync: this);
@@ -466,6 +667,9 @@ class _LiveMapScreenState extends State<LiveMapScreen>
         LatLng(latTween.evaluate(animation), lngTween.evaluate(animation)),
         zoomTween.evaluate(animation),
       );
+      if (rotateTween != null) {
+        _mapController.rotate(rotateTween.evaluate(animation));
+      }
     });
 
     animation.addStatusListener((status) {
@@ -485,7 +689,7 @@ class _LiveMapScreenState extends State<LiveMapScreen>
       final status = (inc['status'] ?? '').toString().toLowerCase();
       return _activeStatuses.contains(status);
     }).toList();
-    
+
     // Build markers (uses caching)
     final markers = _buildMarkers(incidents);
     final userMarker = _buildUserLocationMarker();
@@ -501,213 +705,330 @@ class _LiveMapScreenState extends State<LiveMapScreen>
       if (_pulseController.isAnimating) {
         _pulseController.stop();
       }
-    } else {
-      if (!_pulseController.isAnimating) {
-        _pulseController.repeat(reverse: true);
-      }
-    }
+    } else {}
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Surigao del Norte'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.my_location),
-            tooltip: 'Fit all markers',
-            onPressed: () => _fitBounds(incidents),
-          ),
-          IconButton(
-            icon: Icon(_showList ? Icons.map : Icons.list),
-            tooltip: _showList ? 'Full map' : 'Show list',
-            onPressed: () => setState(() => _showList = !_showList),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => ip.fetchIncidents(silent: true),
-          ),
-        ],
-      ),
+      floatingActionButton: _isNavigating
+          ? null // Hide FAB during navigation to avoid clutter
+          : FloatingActionButton(
+              onPressed: _toggleNavigation,
+              backgroundColor: _isNavigating ? Colors.blue : Colors.white,
+              child: Icon(
+                _isNavigating ? Icons.navigation : Icons.navigation_outlined,
+                color: _isNavigating ? Colors.white : Colors.blue,
+              ),
+            ),
+      appBar: _isNavigating
+          ? null // Hide AppBar during navigation
+          : AppBar(
+              title: const Text('Surigao del Norte'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.my_location),
+                  tooltip: 'Fit all markers',
+                  onPressed: () => _fitBounds(incidents),
+                ),
+                IconButton(
+                  icon: Icon(_showList ? Icons.map : Icons.list),
+                  tooltip: _showList ? 'Full map' : 'Show list',
+                  onPressed: () => setState(() => _showList = !_showList),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () => ip.fetchIncidents(silent: true),
+                ),
+              ],
+            ),
       body: Hero(
         tag: 'map_hero_transition',
         child: Material(
-          child: Column(
+          child: Stack(
             children: [
-              // ── OpenStreetMap ────────────────────────────────
-              Expanded(
-                child: _mapReady
-                    ? FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: RepaintBoundary(
-                          child: FlutterMap(
-                            mapController: _mapController,
-                            options: MapOptions(
-                              initialCenter: _defaultCenter,
-                              initialZoom: _defaultZoom,
-                              minZoom: 8,
-                              maxZoom: 18,
-                              backgroundColor: const Color(0xFFE8E8E8),
-                              // Constrain center to Surigao del Norte bounds
-                              cameraConstraint: CameraConstraint.containCenter(
-                                bounds: _provinceBounds,
-                              ),
-                              interactionOptions: const InteractionOptions(
-                                flags: InteractiveFlag.all,
-                                // Smooth zoom with scroll wheel velocity
-                                scrollWheelVelocity: 0.002,
-                                // Enable pinch move for smoother gestures
-                                enableMultiFingerGestureRace: true,
-                              ),
-                              onMapReady: () {
-                                // Fit to province bounds on first load
-                                Future.delayed(
-                                    const Duration(milliseconds: 200), () {
-                                  if (mounted && markers.isNotEmpty) {
-                                    _fitBounds(incidents);
-                                  }
-                                });
-                              },
-                            ),
-                            children: [
-                              TileLayer(
-                                urlTemplate:
-                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                userAgentPackageName:
-                                    'ph.inno.sdnpdrrmo.dispatch',
-                                maxZoom: 19,
-                                // Optimize buffer sizes for better performance
-                                keepBuffer: 4, // Reduced from 8
-                                panBuffer: 2, // Reduced from 3
-                                // Smooth fade-in for tiles instead of instant pop
-                                tileDisplay: const TileDisplay.fadeIn(
-                                  duration: Duration(milliseconds: 100), // Faster
+              Column(
+                children: [
+                  // ── OpenStreetMap ────────────────────────────────
+                  Expanded(
+                    child: _mapReady
+                        ? FadeTransition(
+                            opacity: _fadeAnimation,
+                            child: RepaintBoundary(
+                              child: FlutterMap(
+                                mapController: _mapController,
+                                options: MapOptions(
+                                  initialCenter: _defaultCenter,
+                                  initialZoom: _defaultZoom,
+                                  minZoom: 8,
+                                  maxZoom: 18,
+                                  backgroundColor: const Color(0xFFE8E8E8),
+                                  // Constrain center to Surigao del Norte bounds
+                                  cameraConstraint:
+                                      CameraConstraint.containCenter(
+                                    bounds: _provinceBounds,
+                                  ),
+                                  interactionOptions: const InteractionOptions(
+                                    flags: InteractiveFlag.all,
+                                    // Smooth zoom with scroll wheel velocity
+                                    scrollWheelVelocity: 0.002,
+                                    // Enable pinch move for smoother gestures
+                                    enableMultiFingerGestureRace: true,
+                                  ),
+                                  onMapReady: () {
+                                    // Fit to province bounds on first load
+                                    Future.delayed(
+                                        const Duration(milliseconds: 200), () {
+                                      if (mounted && markers.isNotEmpty) {
+                                        _fitBounds(incidents);
+                                      }
+                                    });
+                                  },
                                 ),
-                                evictErrorTileStrategy: EvictErrorTileStrategy
-                                    .notVisibleRespectMargin,
+                                children: [
+                                  TileLayer(
+                                    urlTemplate:
+                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                    userAgentPackageName:
+                                        'ph.inno.sdnpdrrmo.dispatch',
+                                    maxZoom: 19,
+                                    // Optimize buffer sizes for better performance
+                                    keepBuffer: 4, // Reduced from 8
+                                    panBuffer: 2, // Reduced from 3
+                                    // Smooth fade-in for tiles instead of instant pop
+                                    tileDisplay: const TileDisplay.fadeIn(
+                                      duration:
+                                          Duration(milliseconds: 100), // Faster
+                                    ),
+                                    evictErrorTileStrategy:
+                                        EvictErrorTileStrategy
+                                            .notVisibleRespectMargin,
+                                  ),
+                                  // Route Polyline Layer
+                                  if (_isNavigating && _routePoints.isNotEmpty)
+                                    PolylineLayer(
+                                      polylines: [
+                                        Polyline(
+                                          points: _routePoints,
+                                          strokeWidth: 5.0,
+                                          color: Colors.blueAccent,
+                                          borderColor: Colors.blue.shade900,
+                                          borderStrokeWidth: 2.0,
+                                        ),
+                                      ],
+                                    ),
+                                  MarkerLayer(markers: allMarkers),
+                                ],
                               ),
-                              MarkerLayer(markers: allMarkers),
-                            ],
+                            ),
+                          )
+                        : const Center(
+                            child: CircularProgressIndicator(),
                           ),
-                        ),
-                      )
-                    : const Center(
-                        child: CircularProgressIndicator(),
+                  ),
+
+                  // ── Severity Legend & Incident List Panel ────────
+                  if (_showList)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, -2)),
+                        ],
                       ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Legend
+                          Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _legendDot(
+                                    'Critical', AppColors.severityCritical),
+                                _legendDot('High', AppColors.severityHigh),
+                                _legendDot('Medium', AppColors.severityMedium),
+                                _legendDot('Low', AppColors.severityLow),
+                                Text('${markers.length} pins',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.primary)),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1),
+
+                          // Incident list
+                          SizedBox(
+                            height: 160,
+                            child: incidents.isEmpty
+                                ? const Center(
+                                    child: Text('No incidents',
+                                        style: TextStyle(
+                                            color: AppColors.textHint)),
+                                  )
+                                : ListView.builder(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 2),
+                                    cacheExtent: 300,
+                                    itemCount: incidents.length > 30
+                                        ? 30
+                                        : incidents.length,
+                                    itemBuilder: (_, i) {
+                                      final inc = incidents[i];
+                                      final severity =
+                                          (inc['severity'] ?? 'medium')
+                                              .toString()
+                                              .toLowerCase();
+                                      final status = (inc['status'] ?? '')
+                                          .toString()
+                                          .toLowerCase();
+                                      final lat = _parseDouble(inc['latitude']);
+                                      final lng =
+                                          _parseDouble(inc['longitude']);
+                                      final hasCoords =
+                                          lat != null && lng != null;
+
+                                      // Only show incidents within bounds
+                                      final inBounds = hasCoords &&
+                                          lat >= _minLat &&
+                                          lat <= _maxLat &&
+                                          lng >= _minLng &&
+                                          lng <= _maxLng;
+
+                                      return ListTile(
+                                        dense: true,
+                                        visualDensity:
+                                            const VisualDensity(vertical: -3),
+                                        leading: Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            color:
+                                                AppColors.incidentSeverityColor(
+                                                    severity),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        title: Text(
+                                          inc['incident_title']?.toString() ??
+                                              inc['title']?.toString() ??
+                                              'Incident #${inc['incident_number'] ?? inc['id']}',
+                                          style: const TextStyle(fontSize: 12),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        subtitle: Text(
+                                          '${inc['municipality'] ?? 'Unknown'} • ${status.replaceAll('_', ' ')}',
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                        trailing: inBounds
+                                            ? const Icon(Icons.place,
+                                                size: 14,
+                                                color: AppColors.primary)
+                                            : const Icon(Icons.place_outlined,
+                                                size: 14,
+                                                color: AppColors.textHint),
+                                        onTap: () {
+                                          if (inBounds) {
+                                            _animatedMove(
+                                                LatLng(lat, lng), 15.0);
+                                            setState(() => _showList = false);
+                                          }
+                                        },
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
 
-              // ── Severity Legend & Incident List Panel ────────
-              if (_showList)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 8,
-                          offset: const Offset(0, -2)),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Legend
-                      Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _legendDot('Critical', AppColors.severityCritical),
-                            _legendDot('High', AppColors.severityHigh),
-                            _legendDot('Medium', AppColors.severityMedium),
-                            _legendDot('Low', AppColors.severityLow),
-                            Text('${markers.length} pins',
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary)),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1),
-
-                      // Incident list
-                      SizedBox(
-                        height: 160,
-                        child: incidents.isEmpty
-                            ? const Center(
-                                child: Text('No incidents',
-                                    style:
-                                        TextStyle(color: AppColors.textHint)),
-                              )
-                            : ListView.builder(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 2),
-                                cacheExtent: 300,
-                                itemCount: incidents.length > 30
-                                    ? 30
-                                    : incidents.length,
-                                itemBuilder: (_, i) {
-                                  final inc = incidents[i];
-                                  final severity = (inc['severity'] ?? 'medium')
-                                      .toString()
-                                      .toLowerCase();
-                                  final status = (inc['status'] ?? '')
-                                      .toString()
-                                      .toLowerCase();
-                                  final lat = _parseDouble(inc['latitude']);
-                                  final lng = _parseDouble(inc['longitude']);
-                                  final hasCoords = lat != null && lng != null;
-
-                                  // Only show incidents within bounds
-                                  final inBounds = hasCoords &&
-                                      lat >= _minLat &&
-                                      lat <= _maxLat &&
-                                      lng >= _minLng &&
-                                      lng <= _maxLng;
-
-                                  return ListTile(
-                                    dense: true,
-                                    visualDensity:
-                                        const VisualDensity(vertical: -3),
-                                    leading: Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.incidentSeverityColor(
-                                            severity),
-                                        shape: BoxShape.circle,
-                                      ),
+              // ── Navigation Overlay ──────────────────────────
+              if (_isNavigating && _routeStats != null)
+                Positioned(
+                  top: 50,
+                  left: 20,
+                  right: 20,
+                  child: Card(
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    color: AppColors.surface,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Column(
+                                children: [
+                                  Text(
+                                    _formatDuration(
+                                        _routeStats!['duration'] as double),
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green,
                                     ),
-                                    title: Text(
-                                      inc['incident_title']?.toString() ??
-                                          inc['title']?.toString() ??
-                                          'Incident #${inc['incident_number'] ?? inc['id']}',
-                                      style: const TextStyle(fontSize: 12),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    subtitle: Text(
-                                      '${inc['municipality'] ?? 'Unknown'} • ${status.replaceAll('_', ' ')}',
-                                      style: const TextStyle(fontSize: 10),
-                                    ),
-                                    trailing: inBounds
-                                        ? const Icon(Icons.place,
-                                            size: 14, color: AppColors.primary)
-                                        : const Icon(Icons.place_outlined,
-                                            size: 14,
-                                            color: AppColors.textHint),
-                                    onTap: () {
-                                      if (inBounds) {
-                                        _animatedMove(LatLng(lat, lng), 15.0);
-                                        setState(() => _showList = false);
-                                      }
-                                    },
-                                  );
-                                },
+                                  ),
+                                  const Text('ETA',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.grey)),
+                                ],
                               ),
+                              const SizedBox(width: 32),
+                              Column(
+                                children: [
+                                  Text(
+                                    _formatDistance(
+                                        _routeStats!['distance'] as double),
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                  ),
+                                  const Text('Distance',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.grey)),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _stopNavigation,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                              ),
+                              icon: const Icon(Icons.stop),
+                              label: const Text('Exit Navigation'),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ),
+                ),
+
+              // ── Loading Indicator ───────────────────────────
+              if (_isFetchingRoute)
+                Container(
+                  color: Colors.black45,
+                  child: const Center(
+                    child: CircularProgressIndicator(),
                   ),
                 ),
             ],

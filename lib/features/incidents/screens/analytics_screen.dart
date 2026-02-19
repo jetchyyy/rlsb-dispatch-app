@@ -155,19 +155,77 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ── AdminLTE-style Small Boxes ────────────────────────────
 
   Widget _summaryBoxes(IncidentProvider ip) {
-    return Row(
+    final avgResponse = ip.statistics?['average_response_time'] ?? 'N/A';
+
+    return Column(
       children: [
-        _smallBox('Active', '${ip.activeCount}', AppColors.severityCritical,
-            Icons.notifications_active),
-        const SizedBox(width: 8),
-        _smallBox('Critical', '${ip.criticalCount}', AppColors.severityHigh,
-            Icons.warning_amber),
-        const SizedBox(width: 8),
-        _smallBox(
-            'New', '${ip.newCount}', AppColors.statusReported, Icons.fiber_new),
-        const SizedBox(width: 8),
-        _smallBox(
-            'Total', '${ip.totalCount}', AppColors.primary, Icons.list_alt),
+        Row(
+          children: [
+            _smallBox('Active', '${ip.activeCount}', AppColors.severityCritical,
+                Icons.notifications_active),
+            const SizedBox(width: 8),
+            _smallBox('Pending', '${ip.pendingCount}', AppColors.statusReported,
+                Icons.hourglass_top),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _smallBox('Dispatched', '${ip.dispatchedCount}', AppColors.primary,
+                Icons.local_shipping),
+            const SizedBox(width: 8),
+            _smallBox('Resolved', '${ip.resolvedCount}',
+                const Color(0xFF22C55E), Icons.check_circle_outline),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Average Response Time Box (Full Width)
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 56,
+                decoration: const BoxDecoration(
+                  color: Colors.blueAccent,
+                  borderRadius:
+                      BorderRadius.horizontal(left: Radius.circular(3)),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(avgResponse,
+                          style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blueAccent)),
+                      Text('Avg Response Time',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Icon(Icons.timer, size: 24, color: Color(0x4D448AFF)),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

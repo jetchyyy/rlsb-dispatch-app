@@ -26,15 +26,10 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
       context.read<IncidentProvider>().fetchIncidents();
     });
 
-    _scrollController.addListener(_onScroll);
+    // _scrollController.addListener(_onScroll); // Removed for manual pagination
   }
 
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      context.read<IncidentProvider>().loadMore();
-    }
-  }
+  // void _onScroll() { ... } // Removed for manual pagination
 
   void _onSearchChanged(String query) {
     _debounce?.cancel();
@@ -83,12 +78,6 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
             onPressed: () => ip.fetchIncidents(),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/incidents/create'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
       ),
       body: Column(
         children: [
