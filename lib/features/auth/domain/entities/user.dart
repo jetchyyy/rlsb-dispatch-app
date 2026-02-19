@@ -3,6 +3,7 @@ class User {
   final String name;
   final String email;
   final String? division;
+  final String? unit;  // e.g., "PDRRMO-ASSERT", "BFP", "PNP"
   final String? position;
   final String? phoneNumber;
   final String? idNumber;
@@ -15,6 +16,7 @@ class User {
     required this.name,
     required this.email,
     this.division,
+    this.unit,
     this.position,
     this.phoneNumber,
     this.idNumber,

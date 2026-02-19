@@ -99,4 +99,23 @@ class AuthProvider extends ChangeNotifier {
       },
     );
   }
+
+  // Refresh user profile from backend
+  Future<void> refreshProfile() async {
+    debugPrint('🔄 Refreshing user profile from backend...');
+    
+    final result = await loginUser.repository.refreshUserProfile();
+
+    result.fold(
+      (failure) {
+        debugPrint('❌ Failed to refresh profile: ${failure.message}');
+        // Don't change auth state, just log the error
+      },
+      (user) {
+        debugPrint('✅ Profile refreshed successfully');
+        _user = user;
+        notifyListeners();
+      },
+    );
+  }
 }

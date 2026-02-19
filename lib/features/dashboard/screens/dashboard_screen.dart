@@ -52,9 +52,10 @@ class _DashboardScreenState extends State<DashboardScreen>
         // Subscribe to new incident alarms
         provider.alarmService.onNewIncidents = _handleNewIncidents;
 
-        // Clear filters and fetch all incidents for stats calculation
+        // Clear filters and fetch all incidents, then filter for today + active
         provider.clearFilters();
         await provider.fetchIncidents();
+        provider.filterTodayAndActive();
         provider.fetchStatistics();
         provider.startAutoRefresh();
       }
@@ -281,10 +282,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         body: RefreshIndicator(
           onRefresh: () async {
             HapticFeedback.mediumImpact();
-            await Future.wait([
-              ip.fetchIncidents(),
-              ip.fetchStatistics(),
-            ]);
+            await ip.fetchIncidents();
+            ip.filterTodayAndActive();
+            await ip.fetchStatistics();
           },
           color: Colors.white,
           backgroundColor: AppColors.primary,
@@ -455,9 +455,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             size: 22,
           ),
           tooltip: 'Refresh',
-          onPressed: () {
+          onPressed: () async {
             HapticFeedback.lightImpact();
-            ip.fetchIncidents();
+            await ip.fetchIncidents();
+            ip.filterTodayAndActive();
             ip.fetchStatistics();
           },
         ),
@@ -792,7 +793,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
             const SizedBox(width: 8),
             GestureDetector(
-              onTap: () => ip.fetchIncidents(),
+              onTap: () async {
+                await ip.fetchIncidents();
+                ip.filterTodayAndActive();
+              },
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

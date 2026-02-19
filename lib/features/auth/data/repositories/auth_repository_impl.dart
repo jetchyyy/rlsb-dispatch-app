@@ -76,4 +76,38 @@ class AuthRepositoryImpl implements AuthRepository {
       return Left(CacheFailure(message: e.toString()));
     }
   }
+  
+  @override
+  Future<Either<Failure, User>> refreshUserProfile() async {
+    try {
+      final token = await tokenStorage.getToken();
+      if (token == null || token.isEmpty) {
+        return Left(AuthFailure(message: 'No authentication token found'));
+      }
+
+      final userModel = await remoteDataSource.fetchUserProfile();
+      
+      // Update cached user data with fresh profile
+      final cachedUserString = await tokenStorage.getUserData();
+      if (cachedUserString != null) {
+        final cachedUser = jsonDecode(cachedUserString) as Map<String, dynamic>;
+        // Merge fresh profile data with cached token
+        final updatedUser = userModel.copyWith(
+          token: cachedUser['token'] as String?,
+        );
+        await tokenStorage.saveUserData(jsonEncode(updatedUser.toJson()));
+        return Right(updatedUser.toEntity());
+      } else {
+        // No cached data, just save the new profile
+        await tokenStorage.saveUserData(jsonEncode(userModel.toJson()));
+        return Right(userModel.toEntity());
+      }
+    } on AuthException catch (e) {
+      return Left(AuthFailure(message: e.message));
+    } on ServerException catch (e) {
+      return Left(ServerFailure(message: e.message));
+    } catch (e) {
+      return Left(ServerFailure(message: e.toString()));
+    }
+  }
 }

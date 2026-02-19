@@ -75,6 +75,11 @@ void main() async {
 
   // Check if user is already logged in
   await authProvider.checkAuthStatus();
+  
+  // If user is authenticated, refresh profile from backend to get latest data (including unit field)
+  if (authProvider.isAuthenticated) {
+    await authProvider.refreshProfile();
+  }
 
   // Initialize background service for keeping GPS alive when backgrounded
   await BackgroundServiceInitializer.initialize();

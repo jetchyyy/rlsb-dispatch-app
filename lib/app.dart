@@ -142,6 +142,17 @@ class _AppState extends State<App> {
     final authProvider = context.read<AuthProvider>();
     _wasAuthenticated = authProvider.isAuthenticated;
 
+    // ── Configure unit filter if user is already authenticated ──────
+    if (_wasAuthenticated && authProvider.user != null) {
+      final incidentProvider = context.read<IncidentProvider>();
+      final user = authProvider.user!;
+      final unit = user.unit;
+      final isAdmin = user.isAdmin;
+      incidentProvider.setUserUnit(unit, isAdmin: isAdmin);
+      debugPrint(
+          '🏷️ App: Initial auth detected → unit="$unit", isAdmin=$isAdmin');
+    }
+
     authProvider.addListener(() {
       if (!mounted) return;
 
@@ -153,6 +164,17 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.startPassiveTracking();
         BackgroundServiceInitializer.startService();
+
+        // ── Configure unit-based incident filtering ────────────
+        final incidentProvider = context.read<IncidentProvider>();
+        final user = authProvider.user;
+        if (user != null) {
+          final unit = user.unit;  // Use the `unit` field from users table
+          final isAdmin = user.isAdmin;
+          incidentProvider.setUserUnit(unit, isAdmin: isAdmin);
+          debugPrint(
+              '🏷️ App: Configured incident filter → unit="$unit", isAdmin=$isAdmin');
+        }
       }
 
       // Logout transition: stop everything
@@ -161,6 +183,10 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.stopAllTracking();
         BackgroundServiceInitializer.stopService();
+
+        // Clear unit filter
+        final incidentProvider = context.read<IncidentProvider>();
+        incidentProvider.setUserUnit(null);
       }
 
       _wasAuthenticated = isNowAuthenticated;

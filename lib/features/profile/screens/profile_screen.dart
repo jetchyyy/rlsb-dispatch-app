@@ -79,6 +79,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // ── Info Cards ─────────────────────────────────
             _infoTile(Icons.badge, 'ID Number', user?.idNumber ?? 'N/A'),
             _infoTile(Icons.business, 'Division', user?.division ?? 'N/A'),
+            _infoTile(Icons.local_fire_department, 'Unit', user?.unit ?? 'N/A'),
             _infoTile(Icons.work, 'Position', user?.position ?? 'N/A'),
             _infoTile(Icons.phone, 'Phone', user?.phoneNumber ?? 'N/A'),
             // Tappable Roles tile for hidden admin mode

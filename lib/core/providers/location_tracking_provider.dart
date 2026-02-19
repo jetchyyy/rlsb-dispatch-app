@@ -145,11 +145,50 @@ class LocationTrackingProvider extends ChangeNotifier {
   /// Revert from active tracking back to passive.
   /// Called when the incident is resolved.
   void stopActiveTracking() {
-    if (_mode != TrackingMode.active) return;
+    final wasActive = _mode == TrackingMode.active;
+    final hadIncidentId = _activeIncidentId != null;
+    final oldIncidentId = _activeIncidentId;
 
-    debugPrint(
-        '📍 Active tracking stopped for incident #$_activeIncidentId – reverting to passive');
+    // Always clear the incident ID, even if mode changed
     _activeIncidentId = null;
+
+    // Clear offline queue entries that contain the old incident ID
+    // to prevent resolved incident pings from being sent later
+    if (oldIncidentId != null && _offlineBox.isNotEmpty) {
+      final toDelete = <int>[];
+      for (int i = 0; i < _offlineBox.length; i++) {
+        try {
+          final raw = _offlineBox.getAt(i);
+          if (raw != null) {
+            final entry = jsonDecode(raw) as Map<String, dynamic>;
+            if (entry['incident_id'] == oldIncidentId) {
+              toDelete.add(i);
+            }
+          }
+        } catch (e) {
+          debugPrint('📍 Error checking offline entry: $e');
+        }
+      }
+      for (final idx in toDelete.reversed) {
+        _offlineBox.deleteAt(idx);
+      }
+      if (toDelete.isNotEmpty) {
+        debugPrint(
+            '📍 Cleared ${toDelete.length} offline pings for incident #$oldIncidentId');
+      }
+    }
+
+    // If we were already in passive mode, just log and return
+    if (!wasActive) {
+      if (hadIncidentId) {
+        debugPrint(
+            '📍 Cleared incident ID while in $_mode mode (was not active)');
+      }
+      notifyListeners();
+      return;
+    }
+
+    debugPrint('📍 Active tracking stopped – reverting to passive');
 
     // Resume passive tracking
     _mode = TrackingMode.passive;
@@ -216,6 +255,9 @@ class LocationTrackingProvider extends ChangeNotifier {
       // Notify listeners (e.g. auto-arrival detection)
       onPositionCaptured?.call(position);
 
+      // Use current system time for timestamp (more reliable than GPS timestamp)
+      final timestamp = DateTime.now().toUtc().toIso8601String();
+
       final entry = <String, dynamic>{
         'latitude': position.latitude,
         'longitude': position.longitude,
@@ -224,7 +266,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         'speed': position.speed,
         'heading': position.heading,
         'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
-        'timestamp': position.timestamp.toUtc().toIso8601String(),
+        'timestamp': timestamp,
         'response_status': _responseStatus,
       };
       if (_activeIncidentId != null) {
@@ -233,7 +275,8 @@ class LocationTrackingProvider extends ChangeNotifier {
 
       debugPrint('📍 ✅ Captured: lat=${position.latitude.toStringAsFixed(6)}, '
           'lng=${position.longitude.toStringAsFixed(6)}, '
-          'acc=${position.accuracy.toStringAsFixed(1)}m');
+          'acc=${position.accuracy.toStringAsFixed(1)}m, '
+          'timestamp=$timestamp');
 
       // Try to send immediately
       try {
@@ -262,7 +305,8 @@ class LocationTrackingProvider extends ChangeNotifier {
   Future<void> flushBatch() async {
     if (_offlineBox.isEmpty) return;
     debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
-    final failed = <int>[];
+    final succeeded = <int>[];
+    final stale = <int>[];
     for (int i = 0; i < _offlineBox.length; i++) {
       try {
         final raw = _offlineBox.getAt(i);
@@ -275,12 +319,21 @@ class LocationTrackingProvider extends ChangeNotifier {
           entry['timestamp'] = entry.remove('captured_at');
         }
 
+        // Skip entries with stale incident IDs (from completed incidents)
+        final entryIncidentId = entry['incident_id'] as int?;
+        if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
+          debugPrint(
+              '📍 Skipping stale ping for incident #$entryIncidentId (current: ${_activeIncidentId ?? "none"})');
+          stale.add(i);
+          continue;
+        }
+
         await _api.post(
           '/location/update',
           data: entry,
         );
         debugPrint('📍 Flushed offline location: $entry');
-        failed.add(i);
+        succeeded.add(i);
       } on DioException catch (e) {
         debugPrint(
             '📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
@@ -288,9 +341,12 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('📍 Offline upload error: $e');
       }
     }
-    // Remove successfully sent entries
-    for (final idx in failed.reversed) {
+    // Remove successfully sent entries and stale entries
+    for (final idx in [...succeeded, ...stale].reversed) {
       await _offlineBox.deleteAt(idx);
+    }
+    if (stale.isNotEmpty) {
+      debugPrint('📍 Removed ${stale.length} stale offline pings');
     }
     notifyListeners();
   }

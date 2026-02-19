@@ -23,6 +23,15 @@ class IncidentAlarmService {
   bool _isPlaying = false;
   bool get isPlaying => _isPlaying;
 
+  // ── Unit-based filtering ───────────────────────────────────
+  /// Current user's unit (e.g., "BFP", "PNP", "PDRRMO-ASSERT").
+  /// When set, only incidents dispatched to this unit trigger alarms.
+  /// This uses the `unit` field from the users table, NOT `division`.
+  String? userUnit;
+
+  /// When true, bypass unit filtering (admin users see all).
+  bool isAdmin = false;
+
   // ── Public API ─────────────────────────────────────────────
 
   /// Call once with the first batch of incidents to seed known IDs
@@ -53,7 +62,34 @@ class IncidentAlarmService {
         // Only alarm on active/new incidents, not already resolved ones
         final status = (inc['status'] ?? '').toString().toLowerCase();
         if (!['resolved', 'closed', 'cancelled'].contains(status)) {
-          newOnes.add(inc);
+          // ── Unit-based alarm filtering ──────────────────────────
+          // Only trigger alarm if the incident has been dispatched to
+          // the current user's unit. Undispatched incidents (null/empty
+          // dispatched_unit) do NOT trigger alarms — the MIS must
+          // dispatch first.
+          //
+          // Bypass: admin users see all, no-unit-set sees all.
+          final dispatchedUnit = inc['dispatched_unit']?.toString();
+          final bool shouldAlarm;
+          if (isAdmin || userUnit == null || userUnit!.isEmpty) {
+            // Admin or no filter configured → alarm on everything
+            shouldAlarm = true;
+          } else {
+            // Regular unit user → only alarm when dispatched_unit
+            // is non-null, non-empty, and matches the user's unit
+            shouldAlarm = dispatchedUnit != null &&
+                dispatchedUnit.isNotEmpty &&
+                dispatchedUnit == userUnit;
+          }
+
+          if (shouldAlarm) {
+            newOnes.add(inc);
+            debugPrint(
+                '   ✅ Alarm triggered: dispatched_unit="$dispatchedUnit" matches user unit="$userUnit"');
+          } else {
+            debugPrint(
+                '   🚫 Skipping alarm: dispatched_unit="$dispatchedUnit" (user unit="$userUnit")');
+          }
         }
         _knownIncidentIds.add(id);
       }

@@ -38,6 +38,31 @@ class IncidentProvider extends ChangeNotifier {
   String? _municipalityFilter;
   String? _searchQuery;
 
+  // ── Unit-based filtering ────────────────────────────────────
+  /// The current user's unit (e.g. "BFP", "PNP", "PDRRMO-ASSERT").
+  /// When set, only incidents dispatched to this unit are shown & alarmed.
+  /// This uses the `unit` field from the users table, NOT `division`.
+  String? _userUnit;
+
+  /// When true the unit filter is bypassed (admin / super-admin users).
+  bool _isAdmin = false;
+
+  String? get userUnit => _userUnit;
+  bool get isAdmin => _isAdmin;
+
+  /// Call after login to configure unit-based incident filtering.
+  /// Pass [unit] from user.unit (e.g., "BFP", "PNP", "PDRRMO-ASSERT").
+  /// Pass [isAdmin] = true so admins/super-admins see ALL incidents.
+  void setUserUnit(String? unit, {bool isAdmin = false}) {
+    _userUnit = unit;
+    _isAdmin = isAdmin;
+    // Propagate to the alarm service so alarm filtering stays in sync
+    alarmService.userUnit = unit;
+    alarmService.isAdmin = isAdmin;
+    debugPrint('🏷️ IncidentProvider: userUnit=$_userUnit, isAdmin=$_isAdmin');
+    notifyListeners();
+  }
+
   // Auto-refresh
   Timer? _refreshTimer;
 
@@ -117,7 +142,7 @@ class IncidentProvider extends ChangeNotifier {
     debugPrint('⏱️ Auto-refresh started (every ${interval.inSeconds}s)');
     _refreshTimer = Timer.periodic(interval, (_) {
       debugPrint('⏱️ Auto-refresh tick');
-      fetchIncidents(silent: true);
+      fetchIncidents(silent: true, activeOnly: true);
 
       // Also refresh the currently viewed incident detail if active
       if (_currentIncident?['id'] != null) {
@@ -164,7 +189,48 @@ class IncidentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Map<String, dynamic> _buildQueryParams({int? page, int limit = 15}) {
+  // ── Filter Today and Active ────────────────────────────────────────────
+  
+  void filterTodayAndActive() {
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    
+    // Keep original list for reference
+    final allIncidents = List<Map<String, dynamic>>.from(_incidents);
+    
+    // Filter to show: active incidents OR incidents resolved/closed/cancelled today
+    _incidents = allIncidents.where((incident) {
+      final status = incident['status']?.toString().toLowerCase() ?? '';
+      
+      // Always show active incidents (not resolved/closed/cancelled)
+      if (status != 'resolved' && status != 'closed' && status != 'cancelled') {
+        return true;
+      }
+      
+      // For resolved/closed/cancelled, check if it happened today
+      final updatedAtStr = incident['updated_at']?.toString();
+      if (updatedAtStr != null) {
+        try {
+          final updatedAt = DateTime.parse(updatedAtStr);
+          return updatedAt.isAfter(todayStart) && updatedAt.isBefore(todayStart.add(Duration(days: 1)));
+        } catch (e) {
+          return false;
+        }
+      }
+      
+      return false;
+    }).toList();
+    
+    debugPrint('📊 Dashboard filter: ${allIncidents.length} total → ${_incidents.length} (active + resolved today)');
+    notifyListeners();
+  }
+
+  Map<String, dynamic> _buildQueryParams({
+    int? page,
+    int limit = 15,
+    bool activeOnly = false,
+  }) {
+    debugPrint('🔍 _buildQueryParams called: activeOnly=$activeOnly, _statusFilter=$_statusFilter');
     final params = <String, dynamic>{'limit': limit, 'page': page ?? 1};
     if (_statusFilter != null) params['status'] = _statusFilter;
     if (_severityFilter != null) params['severity'] = _severityFilter;
@@ -175,10 +241,28 @@ class IncidentProvider extends ChangeNotifier {
       params['search'] = _searchQuery;
     }
 
+    // Exclude completed incidents when activeOnly is true and no specific status filter
+    if (activeOnly && _statusFilter == null) {
+      debugPrint('✅ Applying activeOnly filter: status_not=resolved,closed,cancelled');
+      params['status_not'] = 'resolved,closed,cancelled';
+    } else {
+      debugPrint('❌ NOT applying activeOnly filter (activeOnly=$activeOnly, _statusFilter=$_statusFilter)');
+    }
+
+    // ── Unit-based server-side filter ────────────────────────
+    // If the user belongs to a specific unit and is not admin,
+    // ask the server to return only incidents dispatched to that unit.
+    // Uses the `unit` field from users table (e.g., "BFP", "PNP", "PDRRMO-ASSERT").
+    if (_userUnit != null && _userUnit!.isNotEmpty && !_isAdmin) {
+      params['dispatched_unit'] = _userUnit;
+      debugPrint('🏷️ Applying unit filter: dispatched_unit=$_userUnit');
+    }
+
     // Always include relationships for list view
     params['include'] = 'citizen,assigned_user';
     params['with'] = 'citizen,assigned_user';
 
+    debugPrint('📦 Final params: $params');
     return params;
   }
 
@@ -278,7 +362,10 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Fetch All Incidents ────────────────────────────────────
 
-  Future<void> fetchIncidents({bool silent = false}) async {
+  Future<void> fetchIncidents({
+    bool silent = false,
+    bool activeOnly = false,
+  }) async {
     if (!silent) {
       _isLoading = true;
       _errorMessage = null;
@@ -286,7 +373,7 @@ class IncidentProvider extends ChangeNotifier {
     }
 
     _currentPage = 1;
-    final params = _buildQueryParams(page: 1);
+    final params = _buildQueryParams(page: 1, activeOnly: activeOnly);
     final endpoint = ApiConstants.incidentsEndpoint;
     final fullUrl = '${ApiConstants.baseUrl}$endpoint';
 
@@ -320,7 +407,7 @@ class IncidentProvider extends ChangeNotifier {
         debugPrint('     $line');
       }
 
-      _parseIncidentList(response.data);
+      _parseIncidentList(response.data, activeOnly: activeOnly);
       _lastFetchTime = DateTime.now();
     } on DioException catch (e) {
       _handleDioError(e);
@@ -337,14 +424,14 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Load More (Pagination) ─────────────────────────────────
 
-  Future<void> loadMore() async {
+  Future<void> loadMore({bool activeOnly = false}) async {
     if (_isLoadingMore || !hasMore) return;
 
     _isLoadingMore = true;
     notifyListeners();
 
     final nextPage = _currentPage + 1;
-    final params = _buildQueryParams(page: nextPage);
+    final params = _buildQueryParams(page: nextPage, activeOnly: activeOnly);
 
     debugPrint('');
     debugPrint('📄 LOAD MORE — Page $nextPage of $_lastPage');
@@ -376,9 +463,23 @@ class IncidentProvider extends ChangeNotifier {
         }
       }
 
-      _incidents.addAll(newItems.cast<Map<String, dynamic>>());
+      // Client-side filtering when activeOnly is true (backend doesn't support status_not)
+      List<Map<String, dynamic>> filteredItems = newItems.cast<Map<String, dynamic>>();
+      if (activeOnly && filteredItems.isNotEmpty) {
+        final beforeCount = filteredItems.length;
+        filteredItems = filteredItems.where((incident) {
+          final status = incident['status']?.toString().toLowerCase() ?? '';
+          return status != 'resolved' && status != 'closed' && status != 'cancelled';
+        }).toList();
+        final filteredCount = beforeCount - filteredItems.length;
+        if (filteredCount > 0) {
+          debugPrint('  🗑️ Client-side filter: removed $filteredCount resolved incidents from page $nextPage');
+        }
+      }
+
+      _incidents.addAll(filteredItems);
       debugPrint(
-          '  ✅ Loaded ${newItems.length} more (total: ${_incidents.length})');
+          '  ✅ Loaded ${filteredItems.length} more (total: ${_incidents.length})');
     } on DioException catch (e) {
       debugPrint('  ❌ Load more failed: ${e.message}');
     }
@@ -389,7 +490,7 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Go to Specific Page ────────────────────────────────────
 
-  Future<void> goToPage(int page) async {
+  Future<void> goToPage(int page, {bool activeOnly = false}) async {
     if (page < 1 || page > _lastPage || page == _currentPage) return;
     if (_isLoading) return;
 
@@ -397,7 +498,7 @@ class IncidentProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final params = _buildQueryParams(page: page);
+    final params = _buildQueryParams(page: page, activeOnly: activeOnly);
 
     debugPrint('');
     debugPrint('📄 GO TO PAGE — Page $page of $_lastPage');
@@ -408,7 +509,7 @@ class IncidentProvider extends ChangeNotifier {
         queryParameters: params,
       );
 
-      _parseIncidentList(response.data);
+      _parseIncidentList(response.data, activeOnly: activeOnly);
       _currentPage = page;
       debugPrint('  ✅ Loaded page $page with ${_incidents.length} items');
     } on DioException catch (e) {
@@ -648,11 +749,23 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   Future<bool> closeIncident(int id, {String? notes}) async {
-    return _performAction(id, 'close', ApiConstants.incidentClose(id), notes);
+    final success = await _performAction(
+        id, 'close', ApiConstants.incidentClose(id), notes);
+    if (success) {
+      debugPrint('📍 Close succeeded — reverting to passive GPS tracking');
+      onRespondEnded?.call(id);
+    }
+    return success;
   }
 
   Future<bool> cancelIncident(int id, {String? notes}) async {
-    return _performAction(id, 'cancel', ApiConstants.incidentCancel(id), notes);
+    final success = await _performAction(
+        id, 'cancel', ApiConstants.incidentCancel(id), notes);
+    if (success) {
+      debugPrint('📍 Cancel succeeded — reverting to passive GPS tracking');
+      onRespondEnded?.call(id);
+    }
+    return success;
   }
 
   Future<bool> _performAction(
@@ -777,7 +890,7 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Helpers ────────────────────────────────────────────────
 
-  void _parseIncidentList(dynamic data) {
+  void _parseIncidentList(dynamic data, {bool activeOnly = false}) {
     List<dynamic> list;
 
     if (data is Map<String, dynamic>) {
@@ -823,6 +936,41 @@ class IncidentProvider extends ChangeNotifier {
     }
 
     _incidents = list.cast<Map<String, dynamic>>();
+    
+    // Client-side filtering when activeOnly is true (backend doesn't support status_not)
+    if (activeOnly) {
+      final beforeCount = _incidents.length;
+      _incidents = _incidents.where((incident) {
+        final status = incident['status']?.toString().toLowerCase() ?? '';
+        return status != 'resolved' && status != 'closed' && status != 'cancelled';
+      }).toList();
+      final filteredCount = beforeCount - _incidents.length;
+      if (filteredCount > 0) {
+        debugPrint('  🗑️ Client-side filter: removed $filteredCount resolved/closed/cancelled incidents');
+        debugPrint('  ✅ Remaining: ${_incidents.length} active incidents');
+      }
+    }
+    
+    // ── Client-side unit filter (safety net) ─────────────────
+    // Only show incidents that have been explicitly dispatched to the
+    // current user's unit. Undispatched incidents (null/empty
+    // dispatched_unit) are hidden — the MIS must dispatch first.
+    // Admins bypass this filter and see everything.
+    if (_userUnit != null && _userUnit!.isNotEmpty && !_isAdmin) {
+      final beforeUnitFilter = _incidents.length;
+      _incidents = _incidents.where((incident) {
+        final unit = incident['dispatched_unit']?.toString();
+        // ONLY keep incidents whose dispatched_unit exactly matches
+        // the user's unit. Null/empty = not yet dispatched = hidden.
+        return unit != null && unit.isNotEmpty && unit == _userUnit;
+      }).toList();
+      final removedByUnit = beforeUnitFilter - _incidents.length;
+      if (removedByUnit > 0) {
+        debugPrint('  🏷️ Unit filter: removed $removedByUnit incidents not dispatched to "$_userUnit"');
+        debugPrint('  ✅ Remaining after unit filter: ${_incidents.length}');
+      }
+    }
+
     if (_total == 0) _total = _incidents.length;
 
     // Check for new incidents and trigger alarm if found

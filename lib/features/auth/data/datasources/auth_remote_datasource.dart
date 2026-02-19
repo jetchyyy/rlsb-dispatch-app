@@ -12,6 +12,8 @@ abstract class AuthRemoteDataSource {
   });
 
   Future<void> logout();
+  
+  Future<UserModel> fetchUserProfile();
 }
 
 class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
@@ -98,6 +100,50 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       }
     } catch (e) {
       if (e is ServerException) rethrow;
+      throw ServerException(message: e.toString());
+    }
+  }
+  
+  @override
+  Future<UserModel> fetchUserProfile() async {
+    try {
+      final response = await apiClient.get(ApiConstants.profileEndpoint);
+      
+      if (response.data['success'] == true) {
+        // Get current user data from storage to merge with profile
+        final profileData = response.data;
+        final userData = profileData['user'];
+        
+        // Debug logging to show what we received from backend
+        print('🔄 Fetched user profile from backend:');
+        print('   ID: ${userData['id']}');
+        print('   Name: ${userData['name']}');
+        print('   Email: ${userData['email']}');
+        print('   Division: ${userData['division']}');
+        print('   Unit: ${userData['unit']}');
+        print('   Position: ${userData['position']}');
+        print('   Roles: ${userData['roles']}');
+        print('   Permissions: ${userData['permissions']}');
+        
+        return UserModel.fromJson(profileData['user']);
+      } else {
+        throw ServerException(
+          message: response.data['message'] ?? 'Failed to fetch profile',
+        );
+      }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) {
+        throw AuthException(
+          message: 'Session expired. Please login again.',
+        );
+      } else {
+        throw ServerException(
+          message: e.message ?? 'Failed to fetch user profile',
+          statusCode: e.response?.statusCode,
+        );
+      }
+    } catch (e) {
+      if (e is AuthException || e is ServerException) rethrow;
       throw ServerException(message: e.toString());
     }
   }
