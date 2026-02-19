@@ -26,10 +26,10 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
     super.initState();
     _flashController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 300),
     )..repeat(reverse: true);
 
-    _flashAnimation = Tween<double>(begin: 0.2, end: 0.8).animate(
+    _flashAnimation = Tween<double>(begin: 0.0, end: 0.6).animate(
       CurvedAnimation(parent: _flashController, curve: Curves.easeInOut),
     );
   }

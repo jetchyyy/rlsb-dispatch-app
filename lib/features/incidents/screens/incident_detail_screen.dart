@@ -15,6 +15,7 @@ import '../../e_street_form/models/e_street_form_model.dart';
 import '../../e_street_form/services/e_street_local_storage.dart';
 import '../../e_street_form/services/e_street_pdf_generator.dart';
 import '../../e_street_form/widgets/e_street_form_data_display.dart';
+import '../../e_street_form/screens/pdf_viewer_screen.dart';
 
 class IncidentDetailScreen extends StatefulWidget {
   final int incidentId;
@@ -69,9 +70,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       _hasShownInjuryMapper = true;
 
       // Delay to ensure the detail screen is fully built
-      Future.delayed(const Duration(milliseconds: 500), () {
+      Future.delayed(const Duration(milliseconds: 500), () async {
         if (!mounted) return;
-        Navigator.push(
+        final result = await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => EStreetFormScreen(
@@ -80,6 +81,15 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
             ),
           ),
         );
+
+        if (result is Map && result['openPdf'] != null && mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PdfViewerScreen(pdfUrl: result['openPdf']),
+            ),
+          );
+        }
       });
     }
   }
@@ -187,32 +197,56 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   ),
                 ),
               ),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EStreetFormScreen(
-                        incidentId: widget.incidentId,
-                        incidentData: incident,
+              // Only show E-Street Form and PDF buttons if NOT resolved
+              if (status != 'resolved') ...[
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    // Auto-mark as On Scene if not already, to capture timestamp for analytics
+                    if (status != 'on_scene') {
+                      debugPrint(
+                          '📍 Auto-marking On Scene before opening E-Street Form');
+                      await ip.markOnScene(widget.incidentId);
+                    }
+
+                    if (!context.mounted) return;
+
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EStreetFormScreen(
+                          incidentId: widget.incidentId,
+                          incidentData: incident,
+                        ),
                       ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.assignment, size: 18),
-                label:
-                    const Text('E-Street Form', style: TextStyle(fontSize: 12)),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: () => _generatePdf(incident),
-                icon: const Icon(Icons.picture_as_pdf, size: 18),
-                label: const Text('PDF', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red[700],
-                  side: BorderSide(color: Colors.red[700]!),
+                    );
+
+                    if (result is Map &&
+                        result['openPdf'] != null &&
+                        context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PdfViewerScreen(pdfUrl: result['openPdf']),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.assignment, size: 18),
+                  label: const Text('E-Street Form',
+                      style: TextStyle(fontSize: 12)),
                 ),
-              ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _generatePdf(incident),
+                  icon: const Icon(Icons.picture_as_pdf, size: 18),
+                  label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red[700],
+                    side: BorderSide(color: Colors.red[700]!),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -229,10 +263,21 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     // This handling ensures that if the app is restarted, we don't lock the user out of their own incident.
     final currentUserId = auth.user?.id;
     final assignedUserId = assignedUser?['id'];
+
+    debugPrint('🔍 DEBUG: Checking isMe logic');
+    debugPrint(
+        '   👉 Current User ID (Auth): $currentUserId (${currentUserId.runtimeType})');
+    debugPrint(
+        '   👉 Assigned User ID (Inc): $assignedUserId (${assignedUserId.runtimeType})');
+    debugPrint('   👉 Active Incident ID (Local): ${rp.activeIncidentId}');
+    debugPrint('   👉 Incident ID: ${incident['id']}');
+
     final isMe = (rp.activeIncidentId == incident['id']) ||
         (currentUserId != null &&
             assignedUserId != null &&
             currentUserId.toString() == assignedUserId.toString());
+
+    debugPrint('   ✅ isMe result: $isMe');
 
     // Check if another responder is active
     final isOtherResponder = !isMe &&
@@ -502,22 +547,6 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           backgroundColor: AppColors.success,
         ),
       );
-
-      // If status changed to "on_scene", automatically open E-Street Form
-      if (nextStatus == 'on_scene') {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (!mounted) return;
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EStreetFormScreen(
-                incidentId: incidentId,
-                incidentData: ip.currentIncident,
-              ),
-            ),
-          );
-        });
-      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

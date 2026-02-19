@@ -271,11 +271,6 @@ class IncidentProvider extends ChangeNotifier {
   /// Statistics are computed locally from fetched incidents since
   /// the server does not expose a /statistics endpoint.
   Future<void> fetchStatistics({String period = '24h'}) async {
-    debugPrint('');
-    debugPrint('═══════════════════════════════════════════════════');
-    debugPrint('📊 STATISTICS (computed locally from incident list)');
-    debugPrint('═══════════════════════════════════════════════════');
-
     // Ensure we have fresh data
     if (_incidents.isEmpty) {
       await fetchIncidents(silent: true);
@@ -286,21 +281,23 @@ class IncidentProvider extends ChangeNotifier {
     int respondedCount = 0;
 
     for (final inc in _incidents) {
-      String? startStr = inc['responded_at']?.toString() ??
+      String? startStr = inc['response_started_at']?.toString() ??
           inc['dispatched_at']?.toString() ??
           inc['accepted_at']?.toString();
-      String? endStr = inc['on_scene_at']?.toString();
+      String? endStr = inc['arrived_on_scene_at']?.toString() ??
+          inc['on_scene_at']?.toString();
 
       // Fallback: Check assignments if top-level fields are missing
-      // (Some backends put this data in the assignments relationship)
       if ((startStr == null || endStr == null) &&
           inc['assignments'] is List &&
           (inc['assignments'] as List).isNotEmpty) {
         final firstAssignment = (inc['assignments'] as List).first;
         if (firstAssignment is Map) {
-          startStr ??= firstAssignment['dispatched_at']?.toString() ??
+          startStr ??= firstAssignment['response_started_at']?.toString() ??
+              firstAssignment['dispatched_at']?.toString() ??
               firstAssignment['accepted_at']?.toString();
-          endStr ??= firstAssignment['on_scene_at']?.toString();
+          endStr ??= firstAssignment['arrived_on_scene_at']?.toString() ??
+              firstAssignment['on_scene_at']?.toString();
         }
       }
 
@@ -343,7 +340,6 @@ class IncidentProvider extends ChangeNotifier {
       'average_response_time': _formatDuration(Duration(seconds: avgSeconds)),
     };
 
-    debugPrint('  📊 Stats: $_statistics');
     notifyListeners();
   }
 

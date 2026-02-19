@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../features/incidents/screens/incident_detail_screen.dart';
 import '../providers/incident_response_provider.dart';
 
 /// Persistent banner displayed across all screens when the
@@ -48,53 +49,66 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
 
     return Material(
       elevation: 4,
-      child: Container(
-        color: statusColor,
-        padding: EdgeInsets.only(
-          top: MediaQuery.of(context).padding.top + 4,
-          left: 12,
-          right: 4,
-          bottom: 8,
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.local_fire_department,
-                color: Colors.white, size: 22),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Responding to Incident #${rp.activeIncidentId}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Text(
-                        'Status: ${rp.responseStatusLabel}',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                        ),
-                      ),
-                      if (elapsed != null) ...[
-                        const SizedBox(width: 12),
-                        _buildTimerChip(elapsed, responseTime),
-                      ],
-                    ],
-                  ),
-                ],
+      color: statusColor,
+      child: InkWell(
+        onTap: () {
+          if (rp.activeIncidentId != null) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    IncidentDetailScreen(incidentId: rp.activeIncidentId!),
               ),
-            ),
-            // PopupMenuButton removed per user request (actions are handled in incident detail)
-          ],
+            );
+          }
+        },
+        child: Container(
+          padding: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top + 4,
+            left: 12,
+            right: 4,
+            bottom: 8,
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.local_fire_department,
+                  color: Colors.white, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Responding to Incident #${rp.activeIncidentId}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          'Status: ${rp.responseStatusLabel}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (elapsed != null) ...[
+                          const SizedBox(width: 12),
+                          _buildTimerChip(elapsed, responseTime),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // PopupMenuButton removed per user request (actions are handled in incident detail)
+            ],
+          ),
         ),
       ),
     );

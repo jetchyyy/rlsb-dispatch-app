@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:hive/hive.dart';
+import 'package:intl/intl.dart';
 
 import '../constants/api_constants.dart';
 import '../network/api_client.dart';
@@ -65,7 +66,11 @@ class LocationTrackingProvider extends ChangeNotifier {
   String _responseStatus = 'available';
 
   /// Timer that fires to capture a GPS fix.
+  /// Timer for periodic active/passive updates
   Timer? _captureTimer;
+
+  /// Timer for retrying offline uploads
+  Timer? _flushTimer;
 
   // ── Getters ────────────────────────────────────────────────
 
@@ -107,9 +112,10 @@ class LocationTrackingProvider extends ChangeNotifier {
     _activeIncidentId = null;
     _errorMessage = null;
     debugPrint(
-        '📍 Passive tracking started (every ${ApiConstants.passiveTrackingInterval.inMinutes}m)');
+        '📍 Passive tracking started (every ${ApiConstants.passiveTrackingInterval.inSeconds}s)');
 
     _startCaptureTimer(ApiConstants.passiveTrackingInterval);
+    _startFlushTimer();
 
     // Capture an initial fix immediately
     _capturePosition();
@@ -135,6 +141,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         '📍 Active tracking started for incident #$incidentId (every ${ApiConstants.activeTrackingInterval.inSeconds}s)');
 
     _startCaptureTimer(ApiConstants.activeTrackingInterval);
+    _startFlushTimer();
 
     // Capture an immediate fix
     _capturePosition();
@@ -201,6 +208,8 @@ class LocationTrackingProvider extends ChangeNotifier {
     debugPrint('📍 All tracking stopped');
     _captureTimer?.cancel();
     _captureTimer = null;
+    _flushTimer?.cancel();
+    _flushTimer = null;
     _mode = TrackingMode.off;
     _isTracking = false;
     _activeIncidentId = null;
@@ -218,7 +227,16 @@ class LocationTrackingProvider extends ChangeNotifier {
     _captureTimer = Timer.periodic(interval, (_) => _capturePosition());
   }
 
-  // No-op: batch flush timer removed (per-fix upload)
+  void _startFlushTimer() {
+    _flushTimer?.cancel();
+    // Retry offline uploads every 60 seconds
+    _flushTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (_offlineBox.isNotEmpty) {
+        debugPrint('📍 Periodic flush check...');
+        flushBatch();
+      }
+    });
+  }
 
   Future<void> _capturePosition() async {
     try {
@@ -285,14 +303,23 @@ class LocationTrackingProvider extends ChangeNotifier {
           data: entry,
         );
         debugPrint('📍 Location sent to /location/update');
+
+        // Smart Sync: If upload succeeds, it means we have internet.
+        // Flush any offline items immediately.
+        if (_offlineBox.isNotEmpty) {
+          debugPrint('📍 Online detected — flushing offline queue...');
+          flushBatch();
+        }
       } on DioException catch (e) {
         debugPrint(
             '📍 Upload failed (${e.response?.statusCode}): ${e.message}');
         // Save to offline queue for retry
         _offlineBox.add(jsonEncode(entry));
+        notifyListeners(); // Update UI count
       } catch (e) {
         debugPrint('📍 Upload error: $e');
         _offlineBox.add(jsonEncode(entry));
+        notifyListeners(); // Update UI count
       }
     } catch (e) {
       debugPrint('📍 Capture error: $e');
@@ -305,12 +332,14 @@ class LocationTrackingProvider extends ChangeNotifier {
   Future<void> flushBatch() async {
     if (_offlineBox.isEmpty) return;
     debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
-    final succeeded = <int>[];
-    final stale = <int>[];
+    final failed = <int>[];
     for (int i = 0; i < _offlineBox.length; i++) {
       try {
         final raw = _offlineBox.getAt(i);
-        if (raw == null) continue;
+        if (raw == null) {
+          successfulIndices.add(i); // Remove corrupted/null entries
+          continue;
+        }
         final entry = jsonDecode(raw) as Map<String, dynamic>;
 
         // Migrate old 'captured_at' to 'timestamp' for backward compatibility
@@ -333,20 +362,33 @@ class LocationTrackingProvider extends ChangeNotifier {
           data: entry,
         );
         debugPrint('📍 Flushed offline location: $entry');
-        succeeded.add(i);
+        failed.add(i);
       } on DioException catch (e) {
+        // Stop flushing on network error to avoid unnecessary requests
+        // But if it's a 4xx error (validation), we should probably delete it?
+        // For 422 (unprocessable), we should delete to avoid loop.
+        // For now, only stop on connection errors (0 or 5xx or Unknown).
         debugPrint(
             '📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
+
+        // If it's a permanent error (e.g. 400, 422), discard it
+        if (e.response != null &&
+            (e.response!.statusCode! >= 400 && e.response!.statusCode! < 500)) {
+          debugPrint('📍 Discarding invalid offline entry [index $i]');
+          successfulIndices.add(i);
+        } else {
+          // Network/Server error — stop trying for now
+          break;
+        }
       } catch (e) {
         debugPrint('📍 Offline upload error: $e');
+        // Likely a parsing error, discard
+        successfulIndices.add(i);
       }
     }
-    // Remove successfully sent entries and stale entries
-    for (final idx in [...succeeded, ...stale].reversed) {
+    // Remove successfully sent entries
+    for (final idx in failed.reversed) {
       await _offlineBox.deleteAt(idx);
-    }
-    if (stale.isNotEmpty) {
-      debugPrint('📍 Removed ${stale.length} stale offline pings');
     }
     notifyListeners();
   }

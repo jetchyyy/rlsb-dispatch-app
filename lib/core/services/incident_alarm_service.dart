@@ -102,8 +102,9 @@ class IncidentAlarmService {
         debugPrint(
             '   → id=${inc['id']} type=${inc['incident_type']} severity=${inc['severity']}');
       }
-      _triggerAlarm();
+      // Notify UI immediately *before* starting the audio playback to avoid delay
       onNewIncidents?.call(newOnes);
+      _triggerAlarm();
     }
   }
 
