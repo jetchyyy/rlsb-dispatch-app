@@ -438,9 +438,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         collapseMode: CollapseMode.pin,
       ),
-      title: const Text(
-        'PDRRMO Dispatch',
-        style: TextStyle(
+      title: Text(
+        user?.unit ?? 'PDRRMO Dispatch',
+        style: const TextStyle(
           fontSize: 17,
           fontWeight: FontWeight.w600,
           color: Colors.white,

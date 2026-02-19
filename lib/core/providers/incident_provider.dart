@@ -47,6 +47,10 @@ class IncidentProvider extends ChangeNotifier {
   /// When true the unit filter is bypassed (admin / super-admin users).
   bool _isAdmin = false;
 
+  /// Tracks the current activeOnly preference so auto-refresh uses the same mode.
+  /// When true, hide resolved/closed/cancelled incidents.
+  bool _activeOnly = false;
+
   String? get userUnit => _userUnit;
   bool get isAdmin => _isAdmin;
 
@@ -142,7 +146,7 @@ class IncidentProvider extends ChangeNotifier {
     debugPrint('⏱️ Auto-refresh started (every ${interval.inSeconds}s)');
     _refreshTimer = Timer.periodic(interval, (_) {
       debugPrint('⏱️ Auto-refresh tick');
-      fetchIncidents(silent: true, activeOnly: true);
+      fetchIncidents(silent: true, activeOnly: _activeOnly);
 
       // Also refresh the currently viewed incident detail if active
       if (_currentIncident?['id'] != null) {
@@ -366,6 +370,9 @@ class IncidentProvider extends ChangeNotifier {
     bool silent = false,
     bool activeOnly = false,
   }) async {
+    // Store the activeOnly preference so auto-refresh uses the same mode
+    _activeOnly = activeOnly;
+    
     if (!silent) {
       _isLoading = true;
       _errorMessage = null;
@@ -956,6 +963,7 @@ class IncidentProvider extends ChangeNotifier {
     // current user's unit. Undispatched incidents (null/empty
     // dispatched_unit) are hidden — the MIS must dispatch first.
     // Admins bypass this filter and see everything.
+    bool unitFilterWasApplied = false;
     if (_userUnit != null && _userUnit!.isNotEmpty && !_isAdmin) {
       final beforeUnitFilter = _incidents.length;
       _incidents = _incidents.where((incident) {
@@ -966,12 +974,32 @@ class IncidentProvider extends ChangeNotifier {
       }).toList();
       final removedByUnit = beforeUnitFilter - _incidents.length;
       if (removedByUnit > 0) {
+        unitFilterWasApplied = true;
         debugPrint('  🏷️ Unit filter: removed $removedByUnit incidents not dispatched to "$_userUnit"');
         debugPrint('  ✅ Remaining after unit filter: ${_incidents.length}');
       }
     }
 
-    if (_total == 0) _total = _incidents.length;
+    // ── Recalculate pagination after client-side filtering ────
+    // If client-side filtering significantly changed the incident count,
+    // recalculate pagination to reflect the actual visible results.
+    // This is necessary because the server returns pagination for ALL
+    // incidents, not just those matching the unit filter.
+    if (unitFilterWasApplied || activeOnly) {
+      // Update total to reflect filtered count
+      _total = _incidents.length;
+      // Recalculate last page based on filtered count
+      // Assume 15 items per page (matches the default limit)
+      final itemsPerPage = 15;
+      _lastPage = (_total / itemsPerPage).ceil();
+      if (_lastPage < 1) _lastPage = 1;
+      // Ensure current page doesn't exceed last page
+      if (_currentPage > _lastPage) _currentPage = _lastPage;
+      
+      debugPrint('  📊 Recalculated pagination: $_total total incidents, $_lastPage pages');
+    } else if (_total == 0) {
+      _total = _incidents.length;
+    }
 
     // Check for new incidents and trigger alarm if found
     alarmService.checkForNewIncidents(_incidents);
