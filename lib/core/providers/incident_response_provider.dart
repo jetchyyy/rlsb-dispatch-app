@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Response status values for incident tracking.
 ///
@@ -46,6 +47,18 @@ class IncidentResponseProvider extends ChangeNotifier {
   /// Timer to auto-reset state after completing an incident.
   Timer? _resetTimer;
 
+  // ── Persistence Keys ───────────────────────────────────────
+  static const String _keyActiveIncidentId = 'resp_active_id';
+  static const String _keyResponseStatus = 'resp_status';
+  static const String _keyDispatchTime = 'resp_dispatch_time';
+  static const String _keyArrivalTime = 'resp_arrival_time';
+  static const String _keyIncidentLat = 'resp_incident_lat';
+  static const String _keyIncidentLng = 'resp_incident_lng';
+
+  IncidentResponseProvider() {
+    _restoreState();
+  }
+
   // ── Getters ────────────────────────────────────────────────
 
   int? get activeIncidentId => _activeIncidentId;
@@ -84,11 +97,11 @@ class IncidentResponseProvider extends ChangeNotifier {
   /// in the existing UI means "I'm heading there now").
   /// Records dispatch timestamp and incident coordinates for
   /// auto-arrival detection.
-  void acceptIncident({
+  Future<void> acceptIncident({
     required int incidentId,
     required double lat,
     required double lng,
-  }) {
+  }) async {
     _resetTimer?.cancel();
 
     _activeIncidentId = incidentId;
@@ -102,60 +115,70 @@ class IncidentResponseProvider extends ChangeNotifier {
     debugPrint(
         '🚨 IncidentResponse: accepted incident #$incidentId — status=$_responseStatus');
     notifyListeners();
+    _saveState();
   }
 
   /// Manually mark the responder as en route.
   ///
   /// Typically called if the response flow includes a separate
   /// "dispatched" → "en_route" transition.
-  void markEnRoute() {
+  Future<void> markEnRoute() async {
     if (_activeIncidentId == null) return;
 
     _responseStatus = ResponseStatus.enRoute;
-    debugPrint(
-        '🚨 IncidentResponse: en_route to incident #$_activeIncidentId');
+    debugPrint('🚨 IncidentResponse: en_route to incident #$_activeIncidentId');
     notifyListeners();
+    _saveState();
   }
 
   /// Mark arrival at the incident scene.
   ///
   /// Records the arrival timestamp for response time calculation.
   /// Can be called manually (button) or automatically via [checkArrival].
-  void markOnScene() {
+  Future<void> markOnScene() async {
     if (_activeIncidentId == null) return;
 
     _responseStatus = ResponseStatus.onScene;
     _arrivalTime = DateTime.now();
 
     final responseTime = responseTimeElapsed;
-    debugPrint(
-        '🚨 IncidentResponse: on_scene at incident #$_activeIncidentId '
+    debugPrint('🚨 IncidentResponse: on_scene at incident #$_activeIncidentId '
         '(response time: ${_formatDuration(responseTime)})');
     notifyListeners();
+    _saveState();
   }
 
   /// Complete the incident and begin the returning phase.
   ///
   /// After 5 minutes the state resets to [ResponseStatus.available]
   /// so the responder can accept new incidents.
-  void completeIncident() {
+  ///
+  /// [incidentId]: Optional. If provided, completion only occurs if
+  /// it matches the currently active incident.
+  Future<void> completeIncident({int? incidentId}) async {
+    // If a specific ID is requested to be completed, but we are tracking
+    // a different one, ignore the request. (e.g., resolving a different incident)
+    if (incidentId != null && _activeIncidentId != incidentId) {
+      debugPrint(
+          '🚨 IncidentResponse: Ignoring completion for #$incidentId (currently tracking #$_activeIncidentId)');
+      return;
+    }
+
     if (_activeIncidentId == null) return;
 
     _responseStatus = ResponseStatus.returning;
     _completionTime = DateTime.now();
 
     debugPrint(
-        '🚨 IncidentResponse: returning from incident #$_activeIncidentId');
+        '🚨 IncidentResponse: returning from incident #$_activeIncidentId — resetting state immediately per user request');
     notifyListeners();
 
-    // Auto-reset to available after 5 minutes
-    _resetTimer = Timer(const Duration(minutes: 5), () {
-      resetState();
-    });
+    // Reset immediately to close the banner
+    resetState();
   }
 
   /// Full state reset (for cancel/reject or after the 5-min delay).
-  void resetState() {
+  Future<void> resetState() async {
     _resetTimer?.cancel();
     _activeIncidentId = null;
     _responseStatus = ResponseStatus.available;
@@ -167,6 +190,7 @@ class IncidentResponseProvider extends ChangeNotifier {
 
     debugPrint('🚨 IncidentResponse: state reset to available');
     notifyListeners();
+    _clearState();
   }
 
   // ── Auto-Arrival Detection ─────────────────────────────────
@@ -188,14 +212,84 @@ class IncidentResponseProvider extends ChangeNotifier {
       _incidentLng!,
     );
 
-    debugPrint(
-        '🚨 IncidentResponse: distance to scene = '
+    debugPrint('🚨 IncidentResponse: distance to scene = '
         '${distanceToIncident.toStringAsFixed(1)}m');
 
     if (distanceToIncident <= 50) {
       debugPrint(
           '🚨 IncidentResponse: AUTO-ARRIVAL detected (≤50m) — marking on_scene');
       markOnScene();
+    }
+  }
+
+  // ── Persistence Helpers ────────────────────────────────────
+
+  Future<void> _saveState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_activeIncidentId != null) {
+        await prefs.setInt(_keyActiveIncidentId, _activeIncidentId!);
+        await prefs.setString(_keyResponseStatus, _responseStatus);
+        if (_dispatchTime != null) {
+          await prefs.setString(
+              _keyDispatchTime, _dispatchTime!.toIso8601String());
+        }
+        if (_arrivalTime != null) {
+          await prefs.setString(
+              _keyArrivalTime, _arrivalTime!.toIso8601String());
+        }
+        if (_incidentLat != null) {
+          await prefs.setDouble(_keyIncidentLat, _incidentLat!);
+        }
+        if (_incidentLng != null) {
+          await prefs.setDouble(_keyIncidentLng, _incidentLng!);
+        }
+        debugPrint('💾 IncidentResponse: State saved');
+      }
+    } catch (e) {
+      debugPrint('⚠️ IncidentResponse: Failed to save state: $e');
+    }
+  }
+
+  Future<void> _restoreState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey(_keyActiveIncidentId)) {
+        _activeIncidentId = prefs.getInt(_keyActiveIncidentId);
+        _responseStatus =
+            prefs.getString(_keyResponseStatus) ?? ResponseStatus.available;
+
+        final dispatchStr = prefs.getString(_keyDispatchTime);
+        if (dispatchStr != null) _dispatchTime = DateTime.parse(dispatchStr);
+
+        final arrivalStr = prefs.getString(_keyArrivalTime);
+        if (arrivalStr != null) _arrivalTime = DateTime.parse(arrivalStr);
+
+        _incidentLat = prefs.getDouble(_keyIncidentLat);
+        _incidentLng = prefs.getDouble(_keyIncidentLng);
+
+        debugPrint(
+            '📂 IncidentResponse: State restored (Active ID: $_activeIncidentId)');
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('⚠️ IncidentResponse: Failed to restore state: $e');
+    }
+  }
+
+  Future<void> _clearState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyActiveIncidentId);
+      await prefs.remove(_keyResponseStatus);
+      await prefs.remove(_keyDispatchTime);
+      await prefs.remove(_keyArrivalTime);
+      await prefs.remove(_keyIncidentLat);
+      await prefs.remove(_keyIncidentLng);
+      // We don't clear completion time usually needed for history but here we reset fully
+      debugPrint('🗑️ IncidentResponse: State cleared');
+    } catch (e) {
+      debugPrint('⚠️ IncidentResponse: Failed to clear state: $e');
     }
   }
 

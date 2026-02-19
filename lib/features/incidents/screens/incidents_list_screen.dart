@@ -801,15 +801,53 @@ class _IncidentRow extends StatelessWidget {
                               Text(
                                 status.replaceAll('_', ' ').toUpperCase(),
                                 style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
                                   color: statColor,
-                                  letterSpacing: 0.5,
                                 ),
                               ),
                             ],
                           ),
                         ),
+
+                        // Responder Status Badge (New)
+                        if ((status == 'responding' || status == 'on_scene') &&
+                            incident['assigned_user'] != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  width: 1),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.directions_car_filled,
+                                    size: 10, color: Colors.blue),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(
+                                    status == 'on_scene'
+                                        ? 'ON SCENE'
+                                        : 'EN ROUTE',
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.blue,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         if (severity.isNotEmpty) ...[
                           const SizedBox(width: 6),
                           Container(

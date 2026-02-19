@@ -7,6 +7,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/providers/incident_response_provider.dart';
+// import '../../../core/providers/auth_provider.dart';
+import '../../../features/auth/presentation/providers/auth_provider.dart';
 import '../../e_street_form/screens/e_street_form_screen.dart';
 import '../../e_street_form/models/e_street_form_model.dart';
 import '../../e_street_form/services/e_street_local_storage.dart';
@@ -216,6 +219,30 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       );
     }
 
+    // Check if incident is assigned to someone else
+    final assignedUser = incident['assigned_user'] as Map<String, dynamic>?;
+    final rp = context.read<IncidentResponseProvider>();
+    final auth = context.read<AuthProvider>();
+
+    // Am I the assigned responder?
+    // Check both local state (activeIncidentId) AND the actual incident data (assigned_user.id)
+    // This handling ensures that if the app is restarted, we don't lock the user out of their own incident.
+    final currentUserId = auth.user?.id;
+    final assignedUserId = assignedUser?['id'];
+    final isMe = (rp.activeIncidentId == incident['id']) ||
+        (currentUserId != null &&
+            assignedUserId != null &&
+            currentUserId.toString() == assignedUserId.toString());
+
+    // Check if another responder is active
+    final isOtherResponder = !isMe &&
+        assignedUser != null &&
+        (status == 'responding' || status == 'on_scene');
+
+    // Locked: If another responder is active, we just show the native status info
+    // but the button will be disabled in the UI.
+    // No override needed here.
+
     final label = _actionLabels[next] ?? next.toUpperCase();
     final icon = _actionIcons[next] ?? Icons.arrow_forward;
     final color = AppColors.incidentStatusColor(next);
@@ -237,6 +264,35 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Warning if another responder is active
+            if (isOtherResponder)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline,
+                        size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Responder ${assignedUser['name'] ?? 'Unknown'} is ${status == 'on_scene' ? 'ON SCENE' : 'EN ROUTE'}',
+                        style: const TextStyle(
+                            color: Colors.blue,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
             // Optional notes toggle
             if (_showNotes) ...[
               TextField(
@@ -289,13 +345,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   child: SizedBox(
                     height: 48,
                     child: ElevatedButton.icon(
-                      onPressed: ip.isSubmitting
+                      onPressed: (ip.isSubmitting || isOtherResponder)
                           ? null
                           : () => _confirmStatusChange(
                                 context,
                                 ip,
                                 widget.incidentId,
-                                next,
+                                next, // Use original next, not effectiveNext (no override needed)
                                 label,
                               ),
                       icon: ip.isSubmitting
@@ -307,21 +363,26 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                                 color: Colors.white,
                               ),
                             )
-                          : Icon(icon),
+                          : Icon(isOtherResponder ? Icons.lock : icon),
                       label: Text(
-                        ip.isSubmitting ? 'Updating...' : label,
+                        ip.isSubmitting
+                            ? 'Updating...'
+                            : isOtherResponder
+                                ? 'LOCKED'
+                                : label,
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: color,
+                        backgroundColor: isOtherResponder ? Colors.grey : color,
+                        disabledBackgroundColor: Colors.grey.shade300,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        elevation: 2,
+                        elevation: isOtherResponder ? 0 : 2,
                       ),
                     ),
                   ),
@@ -340,16 +401,24 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     IncidentProvider ip,
     int incidentId,
     String nextStatus,
-    String label,
-  ) async {
+    String label, {
+    Map<String, dynamic>? assignedUser,
+  }) async {
+    String message =
+        'Are you sure you want to update this incident status to "${nextStatus.replaceAll('_', ' ')}"?';
+
+    // Custom warning for shared response
+    if (assignedUser != null && nextStatus == 'responding') {
+      message =
+          'Responder ${assignedUser['name']} is already En Route.\n\nAre you sure you want to respond as well?';
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Confirm: $label'),
-        content: Text(
-          'Are you sure you want to update this incident status to "${nextStatus.replaceAll('_', ' ')}"?',
-        ),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -641,6 +710,47 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                                   statColor),
                               _chip(severity.toUpperCase(), sevColor,
                                   icon: Icons.warning_amber_rounded),
+                              // Responder Status Badge (New)
+                              if ((status == 'responding' ||
+                                      status == 'on_scene') &&
+                                  incident['assigned_user'] != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: Colors.blue.withOpacity(0.3),
+                                        width: 1),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.directions_car_filled,
+                                          size: 14, color: Colors.blue),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          incident['assigned_user']['name'] !=
+                                                  null
+                                              ? '${incident['assigned_user']['name']} is ${status == 'on_scene' ? 'ON SCENE' : 'EN ROUTE'}'
+                                              : (status == 'on_scene'
+                                                  ? 'RESPONDER ON SCENE'
+                                                  : 'RESPONDER EN ROUTE'),
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.blue,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ],
@@ -1105,7 +1215,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
       // Fallback to web URL if geo: scheme not available
-      final webUrl = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+      final webUrl = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
       await launchUrl(webUrl, mode: LaunchMode.externalApplication);
     }
   }

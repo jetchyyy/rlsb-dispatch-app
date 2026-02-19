@@ -67,27 +67,33 @@ class _AppState extends State<App> {
     // When the responder taps "Respond" → switch to 5-second active tracking
     // and start the response lifecycle (en_route).
     incidentProvider.onRespondStarted = (incidentId) {
-      debugPrint('📍 App: Respond started → activating GPS for incident #$incidentId');
-      locationProvider.startActiveTracking(incidentId);
-      BackgroundServiceInitializer.setTrackingMode('active',
-          incidentId: incidentId);
-      BackgroundServiceInitializer.updateNotification(
-        'PDRRMO Dispatch',
-        'Active tracking — responding to incident #$incidentId',
-      );
+      try {
+        debugPrint(
+            '📍 App: Respond started → activating GPS for incident #$incidentId');
+        locationProvider.startActiveTracking(incidentId);
+        BackgroundServiceInitializer.setTrackingMode('active',
+            incidentId: incidentId);
+        BackgroundServiceInitializer.updateNotification(
+          'PDRRMO Dispatch',
+          'Active tracking — responding to incident #$incidentId',
+        );
 
-      // Read incident coordinates from the loaded detail
-      final incident = incidentProvider.currentIncident;
-      final lat = (incident?['latitude'] as num?)?.toDouble() ?? 0.0;
-      final lng = (incident?['longitude'] as num?)?.toDouble() ?? 0.0;
+        // Read incident coordinates from the loaded detail
+        final incident = incidentProvider.currentIncident;
+        final lat = (incident?['latitude'] as num?)?.toDouble() ?? 0.0;
+        final lng = (incident?['longitude'] as num?)?.toDouble() ?? 0.0;
 
-      // Start response tracking with incident coordinates
-      responseProvider.acceptIncident(
-        incidentId: incidentId,
-        lat: lat,
-        lng: lng,
-      );
-      locationProvider.responseStatus = responseProvider.responseStatus;
+        // Start response tracking with incident coordinates
+        responseProvider.acceptIncident(
+          incidentId: incidentId,
+          lat: lat,
+          lng: lng,
+        );
+        locationProvider.responseStatus = responseProvider.responseStatus;
+      } catch (e, stackTrace) {
+        debugPrint('❌ Error starting response tracking: $e');
+        debugPrint(stackTrace.toString());
+      }
     };
 
     // When on-scene is reached (manual via incident action button)
@@ -105,8 +111,9 @@ class _AppState extends State<App> {
     };
 
     // When the incident is resolved → revert to 5-minute passive tracking
-    incidentProvider.onRespondEnded = () {
-      debugPrint('📍 App: Respond ended → reverting to passive GPS');
+    incidentProvider.onRespondEnded = (incidentId) {
+      debugPrint(
+          '📍 App: Respond ended for incident #$incidentId → reverting to passive GPS');
       locationProvider.stopActiveTracking();
       BackgroundServiceInitializer.setTrackingMode('passive');
       BackgroundServiceInitializer.updateNotification(
@@ -114,7 +121,7 @@ class _AppState extends State<App> {
         'Location tracking is active',
       );
 
-      responseProvider.completeIncident();
+      responseProvider.completeIncident(incidentId: incidentId);
       locationProvider.responseStatus = responseProvider.responseStatus;
     };
 
@@ -187,44 +194,6 @@ class _AppState extends State<App> {
         ),
       ),
       routerConfig: _router(context),
-      builder: (context, child) {
-        return Stack(
-          children: [
-            // The actual routed page — push down below the banner
-            // when actively responding to an incident.
-            Consumer<IncidentResponseProvider>(
-              builder: (context, rp, _) {
-                if (!rp.isRespondingToIncident) {
-                  return child ?? const SizedBox.shrink();
-                }
-                // Reserve space at the top for the response banner
-                return Padding(
-                  padding: const EdgeInsets.only(top: 56),
-                  child: child ?? const SizedBox.shrink(),
-                );
-              },
-            ),
-
-            // Response status banner (top, across all screens)
-            const Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: ResponseStatusBanner(),
-            ),
-
-            // Red flash overlay when new incidents arrive
-            if (_pendingAlertIncidents != null &&
-                _pendingAlertIncidents!.isNotEmpty)
-              Positioned.fill(
-                child: IncidentAlertOverlay(
-                  newIncidents: _pendingAlertIncidents!,
-                  onDismiss: _dismissAlert,
-                ),
-              ),
-          ],
-        );
-      },
     );
   }
 
@@ -242,70 +211,112 @@ class _AppState extends State<App> {
         return null;
       },
       routes: [
-        // ── Login ──────────────────────────────────────────
-        GoRoute(
-          path: '/login',
-          name: 'login',
-          builder: (context, state) => const LoginScreen(),
-        ),
+        ShellRoute(
+          builder: (context, state, child) {
+            return Stack(
+              children: [
+                // The actual routed page — push down below the banner
+                // when actively responding to an incident.
+                Consumer<IncidentResponseProvider>(
+                  builder: (context, rp, _) {
+                    if (!rp.isRespondingToIncident) {
+                      return child;
+                    }
+                    // Reserve space at the top for the response banner
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 56),
+                      child: child,
+                    );
+                  },
+                ),
 
-        // ── Dashboard ──────────────────────────────────────
-        GoRoute(
-          path: '/dashboard',
-          name: 'dashboard',
-          builder: (context, state) => const DashboardScreen(),
-        ),
+                // Response status banner (top, across all screens)
+                const Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: ResponseStatusBanner(),
+                ),
 
-        // ── Incidents List ─────────────────────────────────
-        GoRoute(
-          path: '/incidents',
-          name: 'incidents',
-          builder: (context, state) => const IncidentsListScreen(),
-        ),
-
-        // ── Create Incident ────────────────────────────────
-        GoRoute(
-          path: '/incidents/create',
-          name: 'createIncident',
-          builder: (context, state) => const CreateIncidentScreen(),
-        ),
-
-        // ── Incident Detail ────────────────────────────────
-        GoRoute(
-          path: '/incidents/:id',
-          name: 'incidentDetail',
-          builder: (context, state) {
-            final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
-            return IncidentDetailScreen(incidentId: id);
+                // Red flash overlay when new incidents arrive
+                if (_pendingAlertIncidents != null &&
+                    _pendingAlertIncidents!.isNotEmpty)
+                  Positioned.fill(
+                    child: IncidentAlertOverlay(
+                      newIncidents: _pendingAlertIncidents!,
+                      onDismiss: _dismissAlert,
+                    ),
+                  ),
+              ],
+            );
           },
-        ),
+          routes: [
+            // ── Login ──────────────────────────────────────────
+            GoRoute(
+              path: '/login',
+              name: 'login',
+              builder: (context, state) => const LoginScreen(),
+            ),
 
-        // ── Analytics ──────────────────────────────────────
-        GoRoute(
-          path: '/analytics',
-          name: 'analytics',
-          builder: (context, state) => const AnalyticsScreen(),
-        ),
+            // ── Dashboard ──────────────────────────────────────
+            GoRoute(
+              path: '/dashboard',
+              name: 'dashboard',
+              builder: (context, state) => const DashboardScreen(),
+            ),
 
-        // ── Live Map ───────────────────────────────────────
-        GoRoute(
-          path: '/map',
-          name: 'map',
-          builder: (context, state) => const LiveMapScreen(),
-        ),
+            // ── Incidents List ─────────────────────────────────
+            GoRoute(
+              path: '/incidents',
+              name: 'incidents',
+              builder: (context, state) => const IncidentsListScreen(),
+            ),
 
-        // ── Profile ────────────────────────────────────────
-        GoRoute(
-          path: '/profile',
-          name: 'profile',
-          builder: (context, state) => const ProfileScreen(),
-        ),
+            // ── Create Incident ────────────────────────────────
+            GoRoute(
+              path: '/incidents/create',
+              name: 'createIncident',
+              builder: (context, state) => const CreateIncidentScreen(),
+            ),
 
-        // ── Admin Tracker (hidden) ─────────────────────────────
-        GoRoute(
-          path: '/admin/tracker',
-          name: 'adminTracker',
-          builder: (context, state) => const DispatcherTrackerScreen(),
+            // ── Incident Detail ────────────────────────────────
+            GoRoute(
+              path: '/incidents/:id',
+              name: 'incidentDetail',
+              builder: (context, state) {
+                final id = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
+                return IncidentDetailScreen(incidentId: id);
+              },
+            ),
+
+            // ── Analytics ──────────────────────────────────────
+            GoRoute(
+              path: '/analytics',
+              name: 'analytics',
+              builder: (context, state) => const AnalyticsScreen(),
+            ),
+
+            // ── Live Map ───────────────────────────────────────
+            GoRoute(
+              path: '/map',
+              name: 'map',
+              builder: (context, state) => const LiveMapScreen(),
+            ),
+
+            // ── Profile ────────────────────────────────────────
+            GoRoute(
+              path: '/profile',
+              name: 'profile',
+              builder: (context, state) => const ProfileScreen(),
+            ),
+
+            // ── Admin Tracker (hidden) ─────────────────────────────
+            GoRoute(
+              path: '/admin/tracker',
+              name: 'adminTracker',
+              builder: (context, state) => const DispatcherTrackerScreen(),
+            ),
+          ],
         ),
       ],
     );

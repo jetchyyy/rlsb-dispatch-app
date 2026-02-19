@@ -48,7 +48,7 @@ class IncidentProvider extends ChangeNotifier {
 
   /// Called when the incident is resolved.
   /// Signals the tracking system to revert to passive mode.
-  VoidCallback? onRespondEnded;
+  void Function(int incidentId)? onRespondEnded;
 
   /// Called when the responder marks arrival on scene.
   /// Passes the incident ID so the response provider can record arrival.
@@ -112,12 +112,17 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Auto-refresh ───────────────────────────────────────────
 
-  void startAutoRefresh({Duration interval = const Duration(seconds: 30)}) {
+  void startAutoRefresh({Duration interval = const Duration(seconds: 5)}) {
     stopAutoRefresh();
     debugPrint('⏱️ Auto-refresh started (every ${interval.inSeconds}s)');
     _refreshTimer = Timer.periodic(interval, (_) {
       debugPrint('⏱️ Auto-refresh tick');
       fetchIncidents(silent: true);
+
+      // Also refresh the currently viewed incident detail if active
+      if (_currentIncident?['id'] != null) {
+        fetchIncident(_currentIncident!['id'], silent: true);
+      }
     });
   }
 
@@ -166,8 +171,14 @@ class IncidentProvider extends ChangeNotifier {
     if (_typeFilter != null) params['type'] = _typeFilter;
     if (_municipalityFilter != null)
       params['municipality'] = _municipalityFilter;
-    if (_searchQuery != null && _searchQuery!.isNotEmpty)
+    if (_searchQuery != null && _searchQuery!.isNotEmpty) {
       params['search'] = _searchQuery;
+    }
+
+    // Always include relationships for list view
+    params['include'] = 'citizen,assigned_user';
+    params['with'] = 'citizen,assigned_user';
+
     return params;
   }
 
@@ -191,10 +202,28 @@ class IncidentProvider extends ChangeNotifier {
     int respondedCount = 0;
 
     for (final inc in _incidents) {
-      if (inc['responded_at'] != null && inc['on_scene_at'] != null) {
+      String? startStr = inc['responded_at']?.toString() ??
+          inc['dispatched_at']?.toString() ??
+          inc['accepted_at']?.toString();
+      String? endStr = inc['on_scene_at']?.toString();
+
+      // Fallback: Check assignments if top-level fields are missing
+      // (Some backends put this data in the assignments relationship)
+      if ((startStr == null || endStr == null) &&
+          inc['assignments'] is List &&
+          (inc['assignments'] as List).isNotEmpty) {
+        final firstAssignment = (inc['assignments'] as List).first;
+        if (firstAssignment is Map) {
+          startStr ??= firstAssignment['dispatched_at']?.toString() ??
+              firstAssignment['accepted_at']?.toString();
+          endStr ??= firstAssignment['on_scene_at']?.toString();
+        }
+      }
+
+      if (startStr != null && endStr != null) {
         try {
-          final start = DateTime.parse(inc['responded_at'].toString());
-          final end = DateTime.parse(inc['on_scene_at'].toString());
+          final start = DateTime.parse(startStr);
+          final end = DateTime.parse(endStr);
           final diff = end.difference(start).inSeconds;
           if (diff > 0) {
             totalResponseSeconds += diff;
@@ -395,17 +424,21 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Fetch Single Incident ─────────────────────────────────
 
-  Future<void> fetchIncident(int incidentId) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
+  Future<void> fetchIncident(int incidentId, {bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      _errorMessage = null;
+      notifyListeners();
+    }
 
     final endpoint = ApiConstants.incidentDetail(incidentId);
 
-    debugPrint('');
-    debugPrint('═══════════════════════════════════════════════════');
-    debugPrint('🔍 INCIDENT DETAIL — ID: $incidentId');
-    debugPrint('═══════════════════════════════════════════════════');
+    if (!silent) {
+      debugPrint('');
+      debugPrint('═══════════════════════════════════════════════════');
+      debugPrint('🔍 INCIDENT DETAIL — ID: $incidentId');
+      debugPrint('═══════════════════════════════════════════════════');
+    }
 
     try {
       final stopwatch = Stopwatch()..start();
@@ -418,12 +451,13 @@ class IncidentProvider extends ChangeNotifier {
         'with': 'citizen,assigned_user',
       };
 
-      debugPrint('  📎 Query params: $queryParams');
+      if (!silent) debugPrint('  📎 Query params: $queryParams');
 
       final response = await _api.get(endpoint, queryParameters: queryParams);
       stopwatch.stop();
 
-      debugPrint('  ✅ Response in ${stopwatch.elapsedMilliseconds}ms');
+      if (!silent)
+        debugPrint('  ✅ Response in ${stopwatch.elapsedMilliseconds}ms');
 
       final data = response.data;
       if (data is Map<String, dynamic>) {
@@ -432,6 +466,34 @@ class IncidentProvider extends ChangeNotifier {
         _currentIncident = data['incident'] as Map<String, dynamic>? ??
             data['data'] as Map<String, dynamic>? ??
             data;
+
+        // START DEBUG LOGGING
+        debugPrint('  🔍 DEBUG: Validating Assigned User Data');
+        debugPrint('  - ID: ${_currentIncident?['id']}');
+        debugPrint('  - Status: ${_currentIncident?['status']}');
+
+        final assignedUser = _currentIncident?['assigned_user'];
+        debugPrint('  - raw assigned_user field: $assignedUser');
+
+        if (assignedUser is Map) {
+          debugPrint('  - assigned_user[name]: ${assignedUser['name']}');
+          debugPrint('  - assigned_user[id]: ${assignedUser['id']}');
+        } else if (assignedUser == null) {
+          debugPrint('  - assigned_user is NULL');
+        } else {
+          debugPrint(
+              '  - assigned_user is of type: ${assignedUser.runtimeType}');
+        }
+
+        // FULL JSON DUMP
+        debugPrint('  📜 FULL INCIDENT JSON:');
+        try {
+          // Simple manual string conversion to avoid import issues if dart:convert is missing/clashing
+          debugPrint(_currentIncident.toString());
+        } catch (e) {
+          debugPrint('  (Failed to print JSON: $e)');
+        }
+        // END DEBUG LOGGING
 
         // Debug: Log the raw response structure first
         debugPrint('  📋 Response structure:');
@@ -484,10 +546,10 @@ class IncidentProvider extends ChangeNotifier {
       _handleDioError(e);
     } catch (e) {
       debugPrint('  ❌ Error: $e');
-      _errorMessage = 'Failed to load incident.';
+      if (!silent) _errorMessage = 'Failed to load incident.';
     }
 
-    _isLoading = false;
+    if (!silent) _isLoading = false;
     notifyListeners();
   }
 
@@ -580,7 +642,7 @@ class IncidentProvider extends ChangeNotifier {
         id, 'resolve', ApiConstants.incidentResolve(id), notes);
     if (success) {
       debugPrint('📍 Resolve succeeded — reverting to passive GPS tracking');
-      onRespondEnded?.call();
+      onRespondEnded?.call(id);
     }
     return success;
   }
@@ -608,7 +670,7 @@ class IncidentProvider extends ChangeNotifier {
         data: notes != null && notes.isNotEmpty ? {'notes': notes} : null,
       );
       debugPrint('  ✅ Action completed: ${response.statusCode}');
-      debugPrint('  📋 Response: ${response.data}');
+      debugPrint('  📋 Response Data: ${response.data}');
 
       // Refresh incident detail and list
       await Future.wait([
@@ -632,6 +694,65 @@ class IncidentProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  // ── Assignment Actions (Compatibility Layer) ────────────────
+
+  // These methods bridge the gap for screens that use assignment-centric logic
+  // but map them to the corresponding incident actions where possible.
+
+  Future<bool> acceptAssignment(int assignmentId) async {
+    // If we can map assignmentId to incidentId, great.
+    // For now, we assume the UI handles the mapping or we just use the current logic.
+    // Use respondToIncident logic if we have an active incident ID context,
+    // otherwise just return false or implement specific endpoint if it exists.
+
+    // Attempt to find the incident ID associated with this assignment from our loaded list
+    // This is a heuristic since we don't have a direct map loaded.
+    // If the backend has specific assignment endpoints, they should be used.
+    // For now, to prevent crash, we'll try to use the emergency assign endpoint or standard respond.
+
+    debugPrint(
+        '🔄 Accept Assignment #$assignmentId (bridging to respondToIncident)');
+
+    // If we have a current incident loaded, use its ID
+    if (_currentIncident != null) {
+      return respondToIncident(_currentIncident!['id'] as int);
+    }
+
+    _errorMessage = 'Cannot accept assignment: No active incident context.';
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> rejectAssignment(int assignmentId, String reason) async {
+    debugPrint('🔄 Reject Assignment #$assignmentId');
+    // Implementation pending backend endpoint
+    // For now, just return true to simulate success or false with error
+    _errorMessage = 'Reject assignment not yet implemented on backend.';
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> updateAssignmentStatus(int assignmentId, String status) async {
+    debugPrint('🔄 Update Assignment #$assignmentId to $status');
+
+    if (_currentIncident != null) {
+      final id = _currentIncident!['id'] as int;
+      if (status == 'en_route')
+        return respondToIncident(id); // Already responded?
+      if (status == 'on_scene') return markOnScene(id);
+      if (status == 'completed') return resolveIncident(id);
+    }
+
+    return false;
+  }
+
+  // Helper to get assignment by ID (stubbed for now to prevent crash)
+  // Requires importing assignment model if we want to return a real object.
+  // For now return null or dynamic.
+  dynamic getAssignment(int assignmentId) {
+    return null;
   }
 
   // ── Fetch Location Updates ─────────────────────────────────

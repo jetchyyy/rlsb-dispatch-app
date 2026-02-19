@@ -29,7 +29,7 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
       duration: const Duration(milliseconds: 500),
     )..repeat(reverse: true);
 
-    _flashAnimation = Tween<double>(begin: 0.15, end: 0.55).animate(
+    _flashAnimation = Tween<double>(begin: 0.2, end: 0.8).animate(
       CurvedAnimation(parent: _flashController, curve: Curves.easeInOut),
     );
   }
@@ -117,7 +117,8 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -147,7 +148,9 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
                     const SizedBox(height: 24),
 
                     // Incident cards
-                    ...widget.newIncidents.take(5).map((inc) => _buildIncidentCard(inc)),
+                    ...widget.newIncidents
+                        .take(5)
+                        .map((inc) => _buildIncidentCard(inc)),
 
                     if (widget.newIncidents.length > 5)
                       Padding(
@@ -201,7 +204,9 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
   Widget _buildIncidentCard(Map<String, dynamic> inc) {
     final type = inc['incident_type']?.toString() ?? inc['type']?.toString();
     final severity = inc['severity']?.toString();
-    final title = inc['incident_title']?.toString() ?? inc['description']?.toString() ?? 'No title';
+    final title = inc['incident_title']?.toString() ??
+        inc['description']?.toString() ??
+        'No title';
     final number = inc['incident_number']?.toString() ?? '#${inc['id']}';
 
     return Container(

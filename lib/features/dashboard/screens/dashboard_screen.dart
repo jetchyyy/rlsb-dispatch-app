@@ -1375,6 +1375,21 @@ class _IncidentRow extends StatelessWidget {
                         const SizedBox(width: 4),
                         _chip(severity, sevColor),
                       ],
+                      // Responder Status Badge (New for Dashboard)
+                      if ((status == 'responding' || status == 'on_scene') &&
+                          incident['assigned_user'] != null) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Icon(Icons.directions_car_filled,
+                              size: 12, color: Colors.blue),
+                        ),
+                      ],
                     ],
                   ),
                 ],

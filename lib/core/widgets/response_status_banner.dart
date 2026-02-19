@@ -93,11 +93,7 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
                 ],
               ),
             ),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.white),
-              onSelected: (value) => _onStatusAction(value, rp),
-              itemBuilder: (context) => _buildMenuItems(rp.responseStatus),
-            ),
+            // PopupMenuButton removed per user request (actions are handled in incident detail)
           ],
         ),
       ),
@@ -107,8 +103,7 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
   Widget _buildTimerChip(Duration elapsed, Duration? responseTime) {
     // If on_scene or returning, show frozen response time
     final rp = context.read<IncidentResponseProvider>();
-    final showResponseTime =
-        responseTime != null &&
+    final showResponseTime = responseTime != null &&
         (rp.responseStatus == ResponseStatus.onScene ||
             rp.responseStatus == ResponseStatus.returning);
 
@@ -139,80 +134,6 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
         ],
       ),
     );
-  }
-
-  List<PopupMenuEntry<String>> _buildMenuItems(String currentStatus) {
-    final items = <PopupMenuEntry<String>>[];
-
-    if (currentStatus == ResponseStatus.dispatched) {
-      items.add(const PopupMenuItem(
-        value: 'en_route',
-        child: ListTile(
-          leading: Icon(Icons.directions_car, color: Colors.blue),
-          title: Text('Mark En Route'),
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-        ),
-      ));
-    }
-
-    if (currentStatus == ResponseStatus.dispatched ||
-        currentStatus == ResponseStatus.enRoute) {
-      items.add(const PopupMenuItem(
-        value: 'on_scene',
-        child: ListTile(
-          leading: Icon(Icons.location_on, color: Colors.red),
-          title: Text('Mark On Scene'),
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-        ),
-      ));
-    }
-
-    if (currentStatus == ResponseStatus.onScene) {
-      items.add(const PopupMenuItem(
-        value: 'complete',
-        child: ListTile(
-          leading: Icon(Icons.check_circle, color: Colors.green),
-          title: Text('Complete Incident'),
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-        ),
-      ));
-    }
-
-    if (items.isNotEmpty) {
-      items.add(const PopupMenuDivider());
-    }
-
-    items.add(const PopupMenuItem(
-      value: 'cancel',
-      child: ListTile(
-        leading: Icon(Icons.close, color: Colors.grey),
-        title: Text('Cancel Response'),
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-      ),
-    ));
-
-    return items;
-  }
-
-  void _onStatusAction(String action, IncidentResponseProvider rp) {
-    switch (action) {
-      case 'en_route':
-        rp.markEnRoute();
-        break;
-      case 'on_scene':
-        rp.markOnScene();
-        break;
-      case 'complete':
-        rp.completeIncident();
-        break;
-      case 'cancel':
-        rp.resetState();
-        break;
-    }
   }
 
   Color _getStatusColor(String status) {
