@@ -5,7 +5,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:hive/hive.dart';
-import 'package:intl/intl.dart';
 
 import '../constants/api_constants.dart';
 import '../network/api_client.dart';
@@ -332,12 +331,12 @@ class LocationTrackingProvider extends ChangeNotifier {
   Future<void> flushBatch() async {
     if (_offlineBox.isEmpty) return;
     debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
-    final failed = <int>[];
+    final toDelete = <int>[];
     for (int i = 0; i < _offlineBox.length; i++) {
       try {
         final raw = _offlineBox.getAt(i);
         if (raw == null) {
-          successfulIndices.add(i); // Remove corrupted/null entries
+          toDelete.add(i); // Remove corrupted/null entries
           continue;
         }
         final entry = jsonDecode(raw) as Map<String, dynamic>;
@@ -353,7 +352,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
           debugPrint(
               '📍 Skipping stale ping for incident #$entryIncidentId (current: ${_activeIncidentId ?? "none"})');
-          stale.add(i);
+          toDelete.add(i);
           continue;
         }
 
@@ -362,7 +361,7 @@ class LocationTrackingProvider extends ChangeNotifier {
           data: entry,
         );
         debugPrint('📍 Flushed offline location: $entry');
-        failed.add(i);
+        toDelete.add(i);
       } on DioException catch (e) {
         // Stop flushing on network error to avoid unnecessary requests
         // But if it's a 4xx error (validation), we should probably delete it?
@@ -375,7 +374,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         if (e.response != null &&
             (e.response!.statusCode! >= 400 && e.response!.statusCode! < 500)) {
           debugPrint('📍 Discarding invalid offline entry [index $i]');
-          successfulIndices.add(i);
+          toDelete.add(i);
         } else {
           // Network/Server error — stop trying for now
           break;
@@ -383,11 +382,11 @@ class LocationTrackingProvider extends ChangeNotifier {
       } catch (e) {
         debugPrint('📍 Offline upload error: $e');
         // Likely a parsing error, discard
-        successfulIndices.add(i);
+        toDelete.add(i);
       }
     }
-    // Remove successfully sent entries
-    for (final idx in failed.reversed) {
+    // Remove successfully sent or discarded entries
+    for (final idx in toDelete.reversed) {
       await _offlineBox.deleteAt(idx);
     }
     notifyListeners();
