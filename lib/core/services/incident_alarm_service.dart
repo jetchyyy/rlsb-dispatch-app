@@ -105,7 +105,10 @@ class IncidentAlarmService {
       // Trigger UI callback immediately
       onNewIncidents?.call(newOnes);
       // Delay sound by 200ms to let UI render first
-      Future.delayed(const Duration(milliseconds: 200), _triggerAlarm);
+      Future.delayed(const Duration(milliseconds: 200), () => _triggerAlarm());
+    }
+  }
+
   /// Play the alarm siren.
   Future<void> _triggerAlarm() async {
     try {
