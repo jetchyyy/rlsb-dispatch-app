@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -57,6 +59,9 @@ class EStreetApiService {
         for (final item in value) {
           formData.fields.add(MapEntry('$key[]', item.toString()));
         }
+      } else if (value is Map) {
+        // Maps must be JSON-encoded before adding to FormData
+        formData.fields.add(MapEntry(key, jsonEncode(value)));
       } else {
         formData.fields.add(MapEntry(key, value.toString()));
       }

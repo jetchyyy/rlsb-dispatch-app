@@ -134,6 +134,33 @@ class _AppState extends State<App> {
     responseProvider.addListener(() {
       locationProvider.responseStatus = responseProvider.responseStatus;
     });
+
+    // ── Resume Active Tracking on App Restart ──────────────────────
+    // If the app was restarted while responding to an incident,
+    // the IncidentResponseProvider will have restored the active incident
+    // from SharedPreferences. We need to resume active tracking for it.
+    if (responseProvider.activeIncidentId != null) {
+      final restoredIncidentId = responseProvider.activeIncidentId!;
+      debugPrint(
+          '🔄 App: Detected restored active incident #$restoredIncidentId → resuming active tracking');
+      
+      // Resume active GPS tracking for the restored incident
+      locationProvider.startActiveTracking(restoredIncidentId);
+      
+      // Sync the response status
+      locationProvider.responseStatus = responseProvider.responseStatus;
+      
+      // Update background service notification
+      BackgroundServiceInitializer.setTrackingMode('active',
+          incidentId: restoredIncidentId);
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'Active tracking — responding to incident #$restoredIncidentId',
+      );
+      
+      debugPrint(
+          '✅ App: Active tracking resumed with status="${responseProvider.responseStatus}"');
+    }
   }
 
   // ── Auth State Transitions ─────────────────────────────────

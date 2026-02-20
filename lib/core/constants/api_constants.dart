@@ -2,7 +2,10 @@ class ApiConstants {
   ApiConstants._();
 
   // Base URL — points to the Laravel API
-  static const String baseUrl = 'https://pdrrmosdn-sandbox.inno.ph/api';
+  static const String baseUrl = 'https://sdnpdrrmo.inno.ph/api';
+  
+  // Storage URL — points to the Laravel storage folder for PDF files and media
+  static const String storageBaseUrl = 'https://sdnpdrrmo.inno.ph/storage';
 
   // Auth Endpoints (authenticates against the 'users' table)
   static const String loginEndpoint = '/login';

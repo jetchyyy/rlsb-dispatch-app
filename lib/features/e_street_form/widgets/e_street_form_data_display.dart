@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/constants/api_constants.dart';
 import '../../../core/constants/app_colors.dart';
 import '../models/e_street_form_model.dart';
 import '../screens/pdf_viewer_screen.dart';
@@ -21,9 +22,6 @@ class EStreetFormDataDisplay extends StatelessWidget {
   final String? eStreetFormPdfPath;
   final int incidentId;
 
-  /// Base storage URL for the backend (without trailing slash).
-  static const String _storageBaseUrl = 'https://pdrrmosdn-sandbox.inno.ph/storage';
-
   const EStreetFormDataDisplay({
     super.key,
     required this.eStreetFormJson,
@@ -34,7 +32,7 @@ class EStreetFormDataDisplay extends StatelessWidget {
   /// Returns the full URL to the server-generated PDF.
   String? get serverPdfUrl {
     if (eStreetFormPdfPath == null || eStreetFormPdfPath!.isEmpty) return null;
-    return '$_storageBaseUrl/$eStreetFormPdfPath';
+    return '${ApiConstants.storageBaseUrl}/$eStreetFormPdfPath';
   }
 
   @override

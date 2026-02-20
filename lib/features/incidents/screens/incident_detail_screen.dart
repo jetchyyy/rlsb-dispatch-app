@@ -104,6 +104,21 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     super.dispose();
   }
 
+  /// Helper to convert e_street_form to JSON string if it's a Map
+  String? _getEStreetFormJson(dynamic eStreetForm) {
+    if (eStreetForm == null) return null;
+    if (eStreetForm is String) return eStreetForm;
+    if (eStreetForm is Map) {
+      try {
+        return jsonEncode(eStreetForm);
+      } catch (e) {
+        debugPrint('⚠️ Error encoding e_street_form to JSON: $e');
+        return null;
+      }
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final ip = context.watch<IncidentProvider>();
@@ -1050,7 +1065,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
 
         // ── E-Street Form Data ────────────────────────────
         EStreetFormDataDisplay(
-          eStreetFormJson: incident['e_street_form'] as String?,
+          eStreetFormJson: _getEStreetFormJson(incident['e_street_form']),
           eStreetFormPdfPath: incident['e_street_form_pdf'] as String?,
           incidentId: widget.incidentId,
         ),
