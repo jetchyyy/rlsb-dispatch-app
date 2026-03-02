@@ -6,8 +6,6 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
-import '../../../core/services/geocoding_service.dart';
-import '../../../core/services/tts_service.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import '../widgets/map_preview_card.dart';
 
@@ -20,20 +18,12 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
-  // Services for Smart Alerts
-  late final GeocodingService _geocodingService;
-  late final TtsService _ttsService;
-  bool _isAlerting = false;
-
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    _geocodingService = GeocodingService();
-    _ttsService = TtsService();
-    _ttsService.init();
 
     _fadeController = AnimationController(
       vsync: this,
@@ -49,9 +39,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       if (auth.isAuthenticated) {
         final provider = context.read<IncidentProvider>();
 
-        // Subscribe to new incident alarms
-        provider.alarmService.onNewIncidents = _handleNewIncidents;
-
         // Clear filters and fetch all incidents, then filter for today + active
         provider.clearFilters();
         await provider.fetchIncidents();
@@ -63,210 +50,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
-  void _handleNewIncidents(List<Map<String, dynamic>> newIncidents) async {
-    if (!mounted || newIncidents.isEmpty || _isAlerting) return;
-
-    _isAlerting = true;
-    final incident = newIncidents.first; // Handle the first one for now
-    final lat = _parseDouble(incident['latitude']);
-    final lng = _parseDouble(incident['longitude']);
-    String locationText = incident['location_address']?.toString() ??
-        incident['location_description']?.toString() ??
-        'Unknown location';
-
-    // 1. Fetch Address (Reverse Geocoding) ONLY if address is missing
-    if (locationText == 'Unknown location' && lat != null && lng != null) {
-      try {
-        final address = await _geocodingService.getAddress(lat, lng);
-        if (address != null) locationText = address;
-      } catch (_) {}
-    }
-
-    // 2. Prepare TTS Message
-    final type = (incident['incident_type'] ?? incident['type'] ?? 'Emergency')
-        .toString()
-        .replaceAll('_', ' ');
-    final severity = (incident['severity'] ?? 'High').toString();
-    final speech =
-        "Emergency! New $type incident at $locationText. Severity $severity.";
-
-    // 3. Setup TTS Loop & Speak
-    _ttsService.setCompletionHandler(() {
-      if (_isAlerting && mounted) {
-        // Wait 1.5s then repeat
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          if (_isAlerting && mounted) {
-            _ttsService.speak(speech);
-          }
-        });
-      }
-    });
-
-    // Ensure volume is up for TTS
-    _ttsService.speak(speech);
-
-    // 4. Show Visual Alert
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => _buildAlertModal(ctx, incident, locationText),
-      ).then((_) {
-        _isAlerting = false;
-        // Stop everything
-        _ttsService.stop();
-        _ttsService.setCompletionHandler(() {}); // Clear handler
-        context.read<IncidentProvider>().alarmService.stopAlarm();
-      });
-    }
-  }
-
-  double? _parseDouble(dynamic v) {
-    if (v == null) return null;
-    if (v is double) return v;
-    if (v is int) return v.toDouble();
-    if (v is String) return double.tryParse(v);
-    return null;
-  }
-
   @override
   void dispose() {
     _fadeController.dispose();
-    _ttsService.stop();
-    // note: we don't dispose services as they are lightweight, but we should clear the callback
-    // context.read<IncidentProvider>().alarmService.onNewIncidents = null; // Can't easily access context here
     super.dispose();
-  }
-
-  Widget _buildAlertModal(
-      BuildContext ctx, Map<String, dynamic> incident, String address) {
-    final type = (incident['incident_type'] ?? incident['type'] ?? 'Emergency')
-        .toString()
-        .toUpperCase()
-        .replaceAll('_', ' ');
-    final severity =
-        (incident['severity'] ?? 'medium').toString().toLowerCase();
-    final color = AppColors.incidentSeverityColor(severity);
-
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: EdgeInsets.zero,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: Column(
-              children: [
-                const Icon(Icons.warning_amber_rounded,
-                    color: Colors.white, size: 48),
-                const SizedBox(height: 8),
-                const Text(
-                  'NEW INCIDENT ALERT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Body
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                Text(
-                  type,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade800,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    severity.toUpperCase(),
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.location_on,
-                        color: Colors.grey.shade500, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        address,
-                        style: const TextStyle(fontSize: 15, height: 1.4),
-                        textAlign: TextAlign.left,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // Actions
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.grey.shade600,
-                    ),
-                    child: const Text('DISMISS'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      final id = incident['id'];
-                      if (id != null) context.push('/incidents/$id');
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: color,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('VIEW'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override

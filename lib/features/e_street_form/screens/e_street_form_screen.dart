@@ -11,6 +11,8 @@ import '../models/e_street_form_model.dart';
 import '../services/e_street_api_service.dart';
 import '../services/e_street_local_storage.dart';
 import '../../../core/services/offline_action_queue.dart';
+import 'e_street_offline_preview_screen.dart';
+import 'local_pdf_viewer_screen.dart';
 import '../widgets/body_diagram_widget.dart';
 import '../widgets/body_observations_list.dart';
 import '../widgets/gcs_selector.dart';
@@ -274,6 +276,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       try {
         final dt = DateTime.parse(arrivedStr).toLocal();
         _form.timeArrivedScene = '${_pad(dt.hour)}:${_pad(dt.minute)}';
+        debugPrint('📝 Auto-filled timeArrivedScene from on_scene timestamp: ${_form.timeArrivedScene}');
       } catch (_) {}
     }
 
@@ -434,6 +437,13 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      // Auto-fill "Arrived Hospital" with current time if not already set
+      if (_form.timeArrivedHospital == null || _form.timeArrivedHospital!.isEmpty) {
+        final now = DateTime.now();
+        _form.timeArrivedHospital = '${_pad(now.hour)}:${_pad(now.minute)}';
+        debugPrint('📝 Auto-filled timeArrivedHospital: ${_form.timeArrivedHospital}');
+      }
+
       // Export signatures
       _form.patientSignature =
           await _patientSigKey.currentState?.exportBase64() ??
@@ -527,23 +537,15 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
             .read<IncidentProvider>()
             .enqueueEStreetForm(widget.incidentId, _form);
 
-        // Show offline success dialog
-        await showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            icon: const Icon(Icons.wifi_off, color: Colors.orange, size: 48),
-            title: const Text('Saved Offline'),
-            content: const Text(
-                'You are offline. The E-Street Form has been saved locally and will auto-submit when connected.\n\nIncident marked as RESOLVED.'),
-            actions: [
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(ctx); // Close dialog
-                  Navigator.pop(context); // Close screen
-                },
-                child: const Text('Done'),
-              ),
-            ],
+        // Navigate to offline preview screen
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EStreetOfflinePreviewScreen(
+              form: _form,
+              incidentId: widget.incidentId,
+            ),
           ),
         );
       } else {
@@ -1206,6 +1208,105 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _stepHeader('Signatures & Final', Icons.draw),
+
+        // PDF Preview - Terms & Conditions
+        InkWell(
+          onTap: () async {
+            // Open local PDF from assets
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const LocalPdfViewerScreen(
+                  assetPath: 'assets/pdf/terms-v2.pdf',
+                  title: 'Terms & Conditions',
+                ),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade300, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.picture_as_pdf,
+                    color: Colors.red.shade700,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Terms & Conditions',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tap to view PDF',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  color: Colors.grey.shade400,
+                  size: 24,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // Terms & Conditions Notice
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.amber.withOpacity(0.3)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline, color: Colors.amber.shade800, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'By signing below, you acknowledge and agree to be bound by the terms and conditions of this E-Street Form.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.amber.shade900,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
 
         SignaturePadWidget(
           key: _patientSigKey,

@@ -7,6 +7,8 @@ import 'core/providers/incident_provider.dart';
 import 'core/providers/incident_response_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
 import 'core/services/background_service_initializer.dart';
+import 'core/services/tts_service.dart';
+import 'core/services/geocoding_service.dart';
 import 'core/widgets/incident_alert_overlay.dart';
 import 'core/widgets/response_status_banner.dart';
 import 'features/admin/screens/dispatcher_tracker_screen.dart';
@@ -33,9 +35,18 @@ class _AppState extends State<App> {
   /// Track the last auth state so we can react to login/logout transitions.
   bool _wasAuthenticated = false;
 
+  /// TTS service for alarm announcements
+  late final TtsService _ttsService;
+  late final GeocodingService _geocodingService;
+  bool _isAlerting = false;
+
   @override
   void initState() {
     super.initState();
+    _ttsService = TtsService();
+    _ttsService.init();
+    _geocodingService = GeocodingService();
+    
     // Register callbacks after the first frame so providers are ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerAlarmCallback();
@@ -49,12 +60,73 @@ class _AppState extends State<App> {
   void _registerAlarmCallback() {
     final incidentProvider = context.read<IncidentProvider>();
     incidentProvider.alarmService.onNewIncidents = (newIncidents) {
-      if (mounted) {
+      if (mounted && !_isAlerting) {
+        _isAlerting = true;
         setState(() {
           _pendingAlertIncidents = newIncidents;
         });
+        _playTtsAnnouncement(newIncidents);
       }
     };
+  }
+
+  Future<void> _playTtsAnnouncement(List<Map<String, dynamic>> incidents) async {
+    if (incidents.isEmpty) return;
+    
+    final incident = incidents.first;
+    final lat = _parseDouble(incident['latitude']);
+    final lng = _parseDouble(incident['longitude']);
+    String locationText = incident['location_address']?.toString() ??
+        incident['location_description']?.toString() ??
+        'Unknown location';
+
+    // Fetch address via reverse geocoding if needed
+    if (locationText == 'Unknown location' && lat != null && lng != null) {
+      try {
+        final address = await _geocodingService.getAddress(lat, lng);
+        if (address != null) locationText = address;
+      } catch (_) {}
+    }
+
+    // Prepare TTS message
+    final type = (incident['incident_type'] ?? incident['type'] ?? 'Emergency')
+        .toString()
+        .replaceAll('_', ' ');
+    final severity = (incident['severity'] ?? 'High').toString();
+    final speech =
+        "Emergency! New $type incident at $locationText. Severity $severity.";
+
+    // Setup TTS loop - repeat every 1.5 seconds
+    _ttsService.setCompletionHandler(() {
+      if (_isAlerting && mounted) {
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (_isAlerting && mounted) {
+            _ttsService.speak(speech);
+          }
+        });
+      }
+    });
+
+    // Start speaking
+    await _ttsService.speak(speech);
+  }
+
+  void _dismissAlert() {
+    _isAlerting = false;
+    _ttsService.stop();
+    _ttsService.setCompletionHandler(() {}); // Clear handler
+    context.read<IncidentProvider>().alarmService.stopAlarm();
+    setState(() {
+      _pendingAlertIncidents = null;
+    });
+  }
+
+  double? _parseDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
   }
 
   // ── Location Tracking ↔ Incident Actions ─────────────────────
@@ -217,14 +289,6 @@ class _AppState extends State<App> {
       }
 
       _wasAuthenticated = isNowAuthenticated;
-    });
-  }
-
-  void _dismissAlert() {
-    final incidentProvider = context.read<IncidentProvider>();
-    incidentProvider.alarmService.stopAlarm();
-    setState(() {
-      _pendingAlertIncidents = null;
     });
   }
 
