@@ -6,6 +6,7 @@ part 'incident.g.dart';
 class Incident {
   final int id;
   final String? type;
+  @JsonKey(name: 'incident_title')
   final String? title;
   final String? description;
   final String? severity;

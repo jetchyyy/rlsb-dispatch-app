@@ -160,6 +160,33 @@ class _AppState extends State<App> {
       try {
         debugPrint(
             '📍 App: Respond started → activating GPS for incident #$incidentId');
+<<<<<<< Updated upstream
+=======
+        debugPrint(
+            '📍 App: Current incident ID: ${incidentProvider.currentIncident?["id"]}, Status: ${incidentProvider.currentIncident?["status"]}');
+
+        // Read incident coordinates from the loaded detail
+        final incident = incidentProvider.currentIncident;
+        final lat = (incident?['latitude'] as num?)?.toDouble() ?? 0.0;
+        final lng = (incident?['longitude'] as num?)?.toDouble() ?? 0.0;
+
+        // 1️⃣ FIRST: Start response tracking (sets status to 'en_route')
+        debugPrint(
+            '📍 App: Calling acceptIncident with ID=$incidentId, lat=$lat, lng=$lng');
+        responseProvider.acceptIncident(
+          incidentId: incidentId,
+          lat: lat,
+          lng: lng,
+        );
+        debugPrint(
+            '📍 App: After acceptIncident - activeIncidentId=${responseProvider.activeIncidentId}, isResponding=${responseProvider.isRespondingToIncident}');
+
+        // 2️⃣ SECOND: Sync response status to location provider BEFORE tracking starts
+        locationProvider.responseStatus = responseProvider.responseStatus;
+        debugPrint('📍 Response status synced: ${locationProvider.responseStatus}');
+
+        // 3️⃣ THIRD: Start active GPS tracking (will now capture with correct status)
+>>>>>>> Stashed changes
         locationProvider.startActiveTracking(incidentId);
         BackgroundServiceInitializer.setTrackingMode('active',
             incidentId: incidentId);

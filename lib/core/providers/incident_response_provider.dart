@@ -106,6 +106,9 @@ class IncidentResponseProvider extends ChangeNotifier {
     required double lat,
     required double lng,
   }) async {
+    debugPrint(
+        '🚨 IncidentResponse: acceptIncident called with ID=$incidentId, lat=$lat, lng=$lng');
+    
     _resetTimer?.cancel();
 
     _activeIncidentId = incidentId;
@@ -118,9 +121,15 @@ class IncidentResponseProvider extends ChangeNotifier {
     _isBannerHidden = false;
 
     debugPrint(
-        '🚨 IncidentResponse: accepted incident #$incidentId — status=$_responseStatus');
+        '🚨 IncidentResponse: State updated - activeId=$_activeIncidentId, status=$_responseStatus');
+    debugPrint(
+        '🚨 IncidentResponse: isRespondingToIncident=$isRespondingToIncident');
+    
     notifyListeners();
-    _saveState();
+    debugPrint('🚨 IncidentResponse: notifyListeners() called');
+    
+    await _saveState();
+    debugPrint('🚨 IncidentResponse: State saved to SharedPreferences');
   }
 
   /// Hides the response banner manually.

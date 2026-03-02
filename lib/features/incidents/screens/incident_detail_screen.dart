@@ -87,6 +87,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   /// Helper to convert e_street_form to JSON string if it's a Map
+<<<<<<< Updated upstream
   /// OR load the locally saved pending offline form if available.
   String? _getEStreetFormJson(dynamic eStreetForm) {
     if (!mounted) return null; // Safety check for widget
@@ -111,6 +112,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     }
 
     // 2. Fallback to Server Payload
+=======
+  String? _getEStreetFormJson(dynamic eStreetForm) {
+>>>>>>> Stashed changes
     if (eStreetForm == null) return null;
     if (eStreetForm is String) return eStreetForm;
     if (eStreetForm is Map) {
@@ -821,7 +825,6 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     // Location
     final lat = incident['latitude'];
     final lng = incident['longitude'];
-    final address = incident['location_address'] as String?;
     final barangay = incident['barangay'] as String?;
     final municipality = incident['municipality'] as String?;
     final province = incident['province'] as String?;
@@ -886,10 +889,13 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       }
     }
 
-    // Response
-    final assignedUser = incident['assigned_user'] as Map<String, dynamic>?;
-    final internalNotes = incident['internal_notes'] as String?;
-    final resolutionDetails = incident['resolution_details'] as String?;
+    // Response (kept for future use)
+    // ignore: unused_local_variable
+    final _ = incident['assigned_user'] as Map<String, dynamic>?;
+    // ignore: unused_local_variable  
+    final __ = incident['internal_notes'] as String?;
+    // ignore: unused_local_variable
+    final ___ = incident['resolution_details'] as String?;
 
     String timeStr = '';
     if (createdAt != null) {
@@ -1043,8 +1049,6 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           icon: Icons.location_on,
           title: 'Location',
           children: [
-            if (address != null && address.isNotEmpty)
-              _InfoRow(icon: Icons.place, label: 'Address', value: address),
             _InfoRow(
               icon: Icons.map_outlined,
               label: 'Area',
@@ -1393,7 +1397,8 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                         final lng = u['longitude'];
                         final accuracy = u['accuracy'];
                         final speed = u['speed'];
-                        final heading = u['heading'];
+                        // ignore: unused_local_variable
+                        final _ = u['heading'];
 
                         return ListTile(
                           leading: CircleAvatar(

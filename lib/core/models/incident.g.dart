@@ -9,7 +9,7 @@ part of 'incident.dart';
 Incident _$IncidentFromJson(Map<String, dynamic> json) => Incident(
       id: (json['id'] as num).toInt(),
       type: json['type'] as String?,
-      title: json['title'] as String?,
+      title: json['incident_title'] as String?,
       description: json['description'] as String?,
       severity: json['severity'] as String?,
       status: json['status'] as String?,
@@ -31,7 +31,7 @@ Incident _$IncidentFromJson(Map<String, dynamic> json) => Incident(
 Map<String, dynamic> _$IncidentToJson(Incident instance) => <String, dynamic>{
       'id': instance.id,
       'type': instance.type,
-      'title': instance.title,
+      'incident_title': instance.title,
       'description': instance.description,
       'severity': instance.severity,
       'status': instance.status,

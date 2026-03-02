@@ -40,9 +40,21 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
   @override
   Widget build(BuildContext context) {
     final rp = context.watch<IncidentResponseProvider>();
+    
+    debugPrint(
+        '🎯 ResponseStatusBanner: Building - isResponding=${rp.isRespondingToIncident}, activeId=${rp.activeIncidentId}, status=${rp.responseStatus}');
 
+<<<<<<< Updated upstream
     if (!rp.isRespondingToIncident || rp.isBannerHidden)
       return const SizedBox.shrink();
+=======
+    if (!rp.isRespondingToIncident) {
+      debugPrint('🎯 ResponseStatusBanner: Returning empty widget');
+      return const SizedBox.shrink();
+    }
+    
+    debugPrint('🎯 ResponseStatusBanner: Showing banner for incident #${rp.activeIncidentId}');
+>>>>>>> Stashed changes
 
     final statusColor = _getStatusColor(rp.responseStatus);
     final elapsed = rp.totalElapsed;

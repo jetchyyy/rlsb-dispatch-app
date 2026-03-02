@@ -22,6 +22,12 @@ class EStreetFormDataDisplay extends StatelessWidget {
   final String? eStreetFormPdfPath;
   final int incidentId;
 
+<<<<<<< Updated upstream
+=======
+  /// Base storage URL for the backend (without trailing slash).
+  static const String _storageBaseUrl = 'https://sdnpdrrmo.inno.ph/storage';
+
+>>>>>>> Stashed changes
   const EStreetFormDataDisplay({
     super.key,
     required this.eStreetFormJson,

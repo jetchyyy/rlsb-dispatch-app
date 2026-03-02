@@ -663,8 +663,23 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      _showError(
-          'Submission failed: ${e.toString().replaceAll('Exception: ', '')}');
+      
+      print('\n❌ Form Submission Error:');
+      print('   Error: $e');
+      print('   Type: ${e.runtimeType}');
+      
+      String errorMessage = e.toString().replaceAll('Exception: ', '');
+      
+      // Show more user-friendly error message
+      if (errorMessage.contains('Payload too large')) {
+        errorMessage = 'The form data is too large. This usually happens when signatures or images are too big. Please try again with smaller signatures.';
+      } else if (errorMessage.contains('Server error')) {
+        errorMessage = 'Server error occurred. Please try again later or contact support if the problem persists.';
+      } else if (errorMessage.contains('Connection refused') || errorMessage.contains('SocketException')) {
+        errorMessage = 'Cannot connect to server. Please check your internet connection.';
+      }
+      
+      _showError('Submission failed: $errorMessage');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }

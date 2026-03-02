@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/body_region_constants.dart';
-import '../../../core/models/injury_entry.dart';
 import '../../../core/providers/injury_provider.dart';
 
 /// Grouped list of all recorded injuries with edit/delete actions.

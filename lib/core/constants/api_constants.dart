@@ -3,9 +3,12 @@ class ApiConstants {
 
   // Base URL — points to the Laravel API
   static const String baseUrl = 'https://sdnpdrrmo.inno.ph/api';
+<<<<<<< Updated upstream
   
   // Storage URL — points to the Laravel storage folder for PDF files and media
   static const String storageBaseUrl = 'https://sdnpdrrmo.inno.ph/storage';
+=======
+>>>>>>> Stashed changes
 
   // Auth Endpoints (authenticates against the 'users' table)
   static const String loginEndpoint = '/login';
