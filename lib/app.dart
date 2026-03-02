@@ -229,27 +229,38 @@ class _AppState extends State<App> {
     // If the app was restarted while responding to an incident,
     // the IncidentResponseProvider will have restored the active incident
     // from SharedPreferences. We need to resume active tracking for it.
+    //
+    // Note: LocationTrackingProvider also persists its own state now.
+    // This serves as a fallback if the two get out of sync.
     if (responseProvider.activeIncidentId != null) {
       final restoredIncidentId = responseProvider.activeIncidentId!;
-      debugPrint(
-          '🔄 App: Detected restored active incident #$restoredIncidentId → resuming active tracking');
 
-      // Resume active GPS tracking for the restored incident
-      locationProvider.startActiveTracking(restoredIncidentId);
+      // Only start active tracking if not already tracking this incident
+      // (main.dart may have already restored and started tracking)
+      if (locationProvider.activeIncidentId != restoredIncidentId) {
+        debugPrint(
+            '🔄 App: Detected restored active incident #$restoredIncidentId → resuming active tracking');
 
-      // Sync the response status
+        // Resume active GPS tracking for the restored incident
+        locationProvider.startActiveTracking(restoredIncidentId);
+
+        // Update background service notification
+        BackgroundServiceInitializer.setTrackingMode('active',
+            incidentId: restoredIncidentId);
+        BackgroundServiceInitializer.updateNotification(
+          'PDRRMO Dispatch',
+          'Active tracking — responding to incident #$restoredIncidentId',
+        );
+
+        debugPrint(
+            '✅ App: Active tracking resumed with status="${responseProvider.responseStatus}"');
+      } else {
+        debugPrint(
+            '✅ App: Active tracking already running for incident #$restoredIncidentId');
+      }
+
+      // Always sync the response status
       locationProvider.responseStatus = responseProvider.responseStatus;
-
-      // Update background service notification
-      BackgroundServiceInitializer.setTrackingMode('active',
-          incidentId: restoredIncidentId);
-      BackgroundServiceInitializer.updateNotification(
-        'PDRRMO Dispatch',
-        'Active tracking — responding to incident #$restoredIncidentId',
-      );
-
-      debugPrint(
-          '✅ App: Active tracking resumed with status="${responseProvider.responseStatus}"');
     }
   }
 
