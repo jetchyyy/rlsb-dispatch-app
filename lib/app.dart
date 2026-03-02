@@ -14,6 +14,9 @@ import 'core/widgets/response_status_banner.dart';
 import 'features/admin/screens/dispatcher_tracker_screen.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
+import 'features/auth/screens/pre_dashboard_camera_screen.dart';
+import 'features/auth/screens/pre_dashboard_loading_screen.dart';
+import 'features/auth/screens/pre_logout_camera_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/incidents/screens/incidents_list_screen.dart';
 import 'features/incidents/screens/incident_detail_screen.dart';
@@ -368,7 +371,7 @@ class _AppState extends State<App> {
         final isLoginRoute = state.matchedLocation == '/login';
 
         if (!isAuthenticated && !isLoginRoute) return '/login';
-        if (isAuthenticated && isLoginRoute) return '/dashboard';
+        if (isAuthenticated && isLoginRoute) return '/pre-dashboard-checklist';
 
         return null;
       },
@@ -419,6 +422,23 @@ class _AppState extends State<App> {
               path: '/login',
               name: 'login',
               builder: (context, state) => const LoginScreen(),
+            ),
+
+            // ── Pre-Dashboard Flow ─────────────────────────────
+            GoRoute(
+              path: '/pre-dashboard-checklist',
+              name: 'preDashboardChecklist',
+              builder: (context, state) => const PreDashboardCameraScreen(),
+            ),
+            GoRoute(
+              path: '/pre-dashboard-loading',
+              name: 'preDashboardLoading',
+              builder: (context, state) => const PreDashboardLoadingScreen(),
+            ),
+            GoRoute(
+              path: '/pre-logout-checklist',
+              name: 'preLogoutChecklist',
+              builder: (context, state) => const PreLogoutCameraScreen(),
             ),
 
             // ── Dashboard ──────────────────────────────────────
