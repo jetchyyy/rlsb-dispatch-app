@@ -38,7 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (authProvider.isAuthenticated) {
-      context.go('/dashboard');
+      context.go('/pre-dashboard-checklist');
     } else if (authProvider.errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -235,26 +235,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               SizedBox(
                                 width: double.infinity,
                                 height: 52,
-                                child: ElevatedButton.icon(
+                                child: ElevatedButton(
                                   onPressed: authProvider.isLoading
                                       ? null
                                       : _handleLogin,
-                                  icon: authProvider.isLoading
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                      : const Icon(Icons.login),
-                                  label: Text(
-                                    authProvider.isLoading
-                                        ? 'Signing in...'
-                                        : 'Login',
-                                    style: const TextStyle(fontSize: 16),
-                                  ),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,
                                     foregroundColor: Colors.white,
@@ -265,6 +249,27 @@ class _LoginScreenState extends State<LoginScreen> {
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
+                                  child: authProvider.isLoading
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.login),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              'Login',
+                                              style: TextStyle(fontSize: 16),
+                                            ),
+                                          ],
+                                        ),
                                 ),
                               ),
                               const SizedBox(height: 24),

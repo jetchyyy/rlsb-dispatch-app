@@ -85,8 +85,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // Tappable Roles tile for hidden admin mode
             GestureDetector(
               onTap: () => _onRolesTapped(context),
-              child: _infoTile(Icons.security, 'Roles',
-                  user?.roles.join(', ') ?? 'N/A'),
+              child: _infoTile(
+                  Icons.security, 'Roles', user?.roles.join(', ') ?? 'N/A'),
             ),
             const SizedBox(height: 32),
 
@@ -97,9 +97,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: ElevatedButton.icon(
                 onPressed: authProvider.isLoading
                     ? null
-                    : () async {
-                        await authProvider.logout();
-                        if (context.mounted) context.go('/login');
+                    : () {
+                        context.push('/pre-logout-checklist');
                       },
                 icon: authProvider.isLoading
                     ? const SizedBox(
@@ -111,7 +110,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       )
                     : const Icon(Icons.logout),
-                label: Text(authProvider.isLoading ? 'Logging out...' : 'Logout'),
+                label:
+                    Text(authProvider.isLoading ? 'Logging out...' : 'Logout'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.error,
                   foregroundColor: Colors.white,
@@ -132,8 +132,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       leading: Icon(icon, color: AppColors.primary),
       title: Text(label,
           style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-      subtitle:
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+      subtitle: Text(value,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
       contentPadding: EdgeInsets.zero,
     );
   }
