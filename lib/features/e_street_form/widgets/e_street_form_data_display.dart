@@ -70,7 +70,10 @@ class EStreetFormDataDisplay extends StatelessWidget {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
-                _ActionButtons(pdfUrl: serverPdfUrl, incidentId: incidentId),
+                _ActionButtons(
+                  pdfUrl: serverPdfUrl,
+                  incidentId: incidentId,
+                ),
               ],
             ),
             const Divider(height: 20),
@@ -390,7 +393,10 @@ class _ActionButtons extends StatefulWidget {
   final String? pdfUrl;
   final int incidentId;
 
-  const _ActionButtons({required this.pdfUrl, required this.incidentId});
+  const _ActionButtons({
+    required this.pdfUrl,
+    required this.incidentId,
+  });
 
   @override
   State<_ActionButtons> createState() => _ActionButtonsState();
@@ -400,9 +406,11 @@ class _ActionButtonsState extends State<_ActionButtons> {
   bool _isLoading = false;
   String? _localPath;
 
-  /// Downloads the PDF to a temp file and returns the local path.
+  /// Downloads the server PDF to a temp file and returns the local path.
   Future<String?> _downloadPdf() async {
     if (widget.pdfUrl == null) return null;
+    
+    // Check if we already have a local copy
     if (_localPath != null && File(_localPath!).existsSync()) {
       return _localPath;
     }
@@ -414,6 +422,7 @@ class _ActionButtonsState extends State<_ActionButtons> {
       final filePath = '${dir.path}/$fileName';
 
       await Dio().download(widget.pdfUrl!, filePath);
+      
       _localPath = filePath;
       return filePath;
     } catch (e) {
@@ -496,8 +505,9 @@ class _ActionButtonsState extends State<_ActionButtons> {
   void _showNoPdfError() {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('PDF not available. Submit the form first.'),
+        content: Text('PDF not yet available. Please wait for the form to sync.'),
         backgroundColor: AppColors.error,
+        duration: Duration(seconds: 3),
       ),
     );
   }

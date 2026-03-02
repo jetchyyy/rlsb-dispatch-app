@@ -321,7 +321,8 @@ class LocationTrackingProvider extends ChangeNotifier {
         notifyListeners(); // Update UI count
       }
     } catch (e) {
-      debugPrint('📍 Capture error: $e');
+      debugPrint('📍 ⚠️ GPS capture failed: $e');
+      debugPrint('   This may indicate GPS signal issues or permission problems');
     }
   }
 

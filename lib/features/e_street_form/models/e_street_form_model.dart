@@ -70,6 +70,10 @@ class EStreetFormModel {
   String? responderSignature;
   String? finalComments;
 
+  // ── Feedback (Optional) ─────────────────────────────────
+  String? feedbackRating; // excellent, good, fair, poor
+  String? feedbackComments;
+
   // ── Computed ────────────────────────────────────────────
   int get gcsTotal => (gcsEye ?? 0) + (gcsVerbal ?? 0) + (gcsMotor ?? 0);
 
@@ -126,6 +130,8 @@ class EStreetFormModel {
     this.doctorSignature,
     this.responderSignature,
     this.finalComments,
+    this.feedbackRating,
+    this.feedbackComments,
   })  : skin = skin ?? [],
         bodyObservations = bodyObservations ?? {},
         aid = aid ?? [],
@@ -235,6 +241,8 @@ class EStreetFormModel {
     addIfNotEmpty('doctor_signature', doctorSignature);
     addIfNotEmpty('responder_signature', responderSignature);
     addIfNotEmpty('final_comments', finalComments);
+    addIfNotEmpty('feedback_rating', feedbackRating);
+    addIfNotEmpty('feedback_comments', feedbackComments);
 
     return map;
   }
@@ -307,6 +315,8 @@ class EStreetFormModel {
     add('doctor_signature', doctorSignature);
     add('responder_signature', responderSignature);
     add('final_comments', finalComments);
+    add('feedback_rating', feedbackRating);
+    add('feedback_comments', feedbackComments);
 
     return map;
   }
@@ -366,6 +376,8 @@ class EStreetFormModel {
       doctorSignature: _str(json['doctor_signature']),
       responderSignature: _str(json['responder_signature']),
       finalComments: _str(json['final_comments']),
+      feedbackRating: _str(json['feedback_rating']),
+      feedbackComments: _str(json['feedback_comments']),
     );
   }
 

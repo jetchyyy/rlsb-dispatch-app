@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:dio/dio.dart';
 
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/providers/incident_response_provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../models/e_street_form_model.dart';
@@ -206,10 +207,21 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       } catch (_) {}
     }
 
-    // Auto-populate Departed Scene and Arrived Scene
+    // Auto-populate Time of Departure and Arrived Scene
     String? departedStr = data['response_started_at']?.toString();
     String? arrivedStr = data['arrived_on_scene_at']?.toString() ??
         data['on_scene_at']?.toString();
+
+    debugPrint('📝 E-Street Form: Received incident data for ID ${widget.incidentId}');
+    debugPrint('  - Status: ${data['status']}');
+    debugPrint('  - arrived_on_scene_at: ${data['arrived_on_scene_at']}');
+    debugPrint('  - on_scene_at: ${data['on_scene_at']}');
+    debugPrint('  - response_started_at: ${data['response_started_at']}');
+    if (arrivedStr != null) {
+      debugPrint('  ✅ Initial arrivedStr found: $arrivedStr');
+    } else {
+      debugPrint('  ⚠️ No arrivedStr in incident data, will check fallback sources');
+    }
 
     // Check status_history (most reliable source of timeline events)
     if (data['status_history'] != null) {
@@ -247,7 +259,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       }
     }
 
-    // FINAL FALLBACK: Check Offline Action Queue for pending un-synced events
+    // FALLBACK 1: Check Offline Action Queue for pending un-synced events
     try {
       final offlineQueue = OfflineActionQueue();
       // Ensure initialized before accessing
@@ -258,17 +270,45 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
             .toList();
         for (final auth in actions) {
           final s = auth.action.toLowerCase();
-          if (s == 'responding') departedStr ??= auth.recordedAt;
-          if (s == 'on_scene' || s == 'on-scene')
+          if (s == 'responding') {
+            departedStr ??= auth.recordedAt;
+            if (departedStr == auth.recordedAt) {
+              debugPrint('📝 Using OFFLINE QUEUE timestamp for departure: ${auth.recordedAt}');
+            }
+          }
+          if (s == 'on_scene' || s == 'on-scene') {
             arrivedStr ??= auth.recordedAt;
+            if (arrivedStr == auth.recordedAt) {
+              debugPrint('📝 Using OFFLINE QUEUE timestamp for arrival: ${auth.recordedAt}');
+            }
+          }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('⚠️ Error checking offline queue: $e');
+    }
+
+    // FALLBACK 2: Check IncidentResponseProvider for locally stored arrival time
+    // This is especially useful when offline or when the action was just performed
+    if (arrivedStr == null && mounted) {
+      try {
+        final responseProvider = context.read<IncidentResponseProvider>();
+        if (responseProvider.activeIncidentId == widget.incidentId &&
+            responseProvider.arrivalTime != null) {
+          arrivedStr = responseProvider.arrivalTime!.toIso8601String();
+          debugPrint('📝 Using RESPONSE PROVIDER timestamp for arrival: $arrivedStr');
+          debugPrint('  - This is the locally stored arrival time (works offline)');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error checking response provider: $e');
+      }
+    }
 
     if (departedStr != null && _form.timeDepartedScene == null) {
       try {
         final dt = DateTime.parse(departedStr).toLocal();
         _form.timeDepartedScene = '${_pad(dt.hour)}:${_pad(dt.minute)}';
+        debugPrint('📝 Auto-filled timeDepartedScene: ${_form.timeDepartedScene}');
       } catch (_) {}
     }
 
@@ -276,8 +316,21 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       try {
         final dt = DateTime.parse(arrivedStr).toLocal();
         _form.timeArrivedScene = '${_pad(dt.hour)}:${_pad(dt.minute)}';
-        debugPrint('📝 Auto-filled timeArrivedScene from on_scene timestamp: ${_form.timeArrivedScene}');
-      } catch (_) {}
+        debugPrint('✅ Successfully auto-filled timeArrivedScene: ${_form.timeArrivedScene}');
+        debugPrint('  - Source timestamp: $arrivedStr');
+        debugPrint('  - This timestamp will persist even when offline');
+      } catch (e) {
+        debugPrint('  ❌ Failed to parse arrivedStr: $arrivedStr');
+        debugPrint('  - Error: $e');
+      }
+    } else {
+      if (_form.timeArrivedScene == null) {
+        debugPrint('⚠️ Did NOT auto-fill timeArrivedScene');
+        debugPrint('  - arrivedStr is: $arrivedStr');
+        debugPrint('  - This might be expected if responder hasn\'t marked on-scene yet');
+      } else {
+        debugPrint('ℹ️ timeArrivedScene already has a value: ${_form.timeArrivedScene}');
+      }
     }
 
     // Try to load existing e_street_form JSON from the incident
@@ -479,20 +532,47 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         form: _form,
       );
 
+      debugPrint('📄 E-Street form submission complete');
+      debugPrint('📦 API Full Response: $result');
+      
+      // Extract PDF URL from various possible response structures
+      final pdfUrl = result['pdf_url'] as String? ?? 
+                     result['data']?['pdf_url'] as String? ??
+                     result['e_street_form_pdf'] as String?;
+      
+      if (pdfUrl != null) {
+        debugPrint('📄 ✅ Received PDF URL from server: $pdfUrl');
+      } else {
+        debugPrint('⚠️ NO PDF URL in API response!');
+        debugPrint('   Available keys: ${result.keys.toList()}');
+        if (result['data'] != null) {
+          debugPrint('   Data keys: ${(result['data'] as Map?)?.keys.toList()}');
+        }
+      }
+
       // Auto-resolve the incident
       if (mounted) {
         try {
-          await context
-              .read<IncidentProvider>()
-              .resolveIncident(widget.incidentId);
+          final incidentProvider = context.read<IncidentProvider>();
+          await incidentProvider.resolveIncident(widget.incidentId);
+          
+          // Ensure the PDF URL is in the current incident after resolving
+          // (in case server's incident detail endpoint doesn't return it immediately)
+          if (pdfUrl != null) {
+            incidentProvider.injectPdfUrl(widget.incidentId, pdfUrl);
+          } else {
+            // No PDF URL in submit response - fetch incident again after delay
+            debugPrint('⏳ No PDF URL found, will retry fetch after 2 seconds...');
+            await Future.delayed(const Duration(seconds: 2));
+            await incidentProvider.fetchIncident(widget.incidentId, silent: true);
+            debugPrint('🔄 Refetched incident after delay');
+          }
         } catch (e) {
           debugPrint('Failed to auto-resolve incident: $e');
         }
       }
 
       if (!mounted) return;
-
-      final pdfUrl = result['pdf_url'] as String?;
 
       // Show success
       await showDialog(
@@ -529,6 +609,12 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     } on DioException catch (e) {
       if (!mounted) return;
 
+      debugPrint('🚨 E-Street Form Submission Error');
+      debugPrint('   Status Code: ${e.response?.statusCode}');
+      debugPrint('   Error Type: ${e.type}');
+      debugPrint('   Message: ${e.message}');
+      debugPrint('   Response Data: ${e.response?.data}');
+
       final isOffline = context.read<IncidentProvider>().isOfflineException(e);
 
       if (isOffline) {
@@ -537,7 +623,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
             .read<IncidentProvider>()
             .enqueueEStreetForm(widget.incidentId, _form);
 
-        // Navigate to offline preview screen
+        // Navigate to offline preview screen (shows full copy of what was filled)
         if (!mounted) return;
         Navigator.pushReplacement(
           context,
@@ -549,8 +635,31 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           ),
         );
       } else {
-        final errorDetails = e.response?.data?.toString() ?? e.message;
-        _showError('Submission failed (500 Server Crash):\n\n$errorDetails');
+        // Server error (4xx or 5xx)
+        final statusCode = e.response?.statusCode ?? 'Unknown';
+        final responseData = e.response?.data;
+        
+        String errorMessage = 'Submission failed: Server error ($statusCode)';
+        
+        if (responseData is Map) {
+          // Laravel validation errors
+          if (responseData.containsKey('message')) {
+            errorMessage = responseData['message'].toString();
+          }
+          if (responseData.containsKey('errors')) {
+            final errors = responseData['errors'] as Map?;
+            if (errors != null) {
+              errorMessage += '\n\nValidation Errors:';
+              errors.forEach((key, value) {
+                errorMessage += '\n• $key: ${value is List ? value.join(', ') : value}';
+              });
+            }
+          }
+        } else if (responseData != null) {
+          errorMessage += '\n\n${responseData.toString()}';
+        }
+        
+        _showError(errorMessage);
       }
     } catch (e) {
       if (!mounted) return;
@@ -1106,7 +1215,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         Row(
           children: [
             Expanded(
-              child: _timeTile('Departed Scene', _form.timeDepartedScene,
+              child: _timeTile('Time of Departure', _form.timeDepartedScene,
                   (v) => setState(() => _form.timeDepartedScene = v)),
             ),
             const SizedBox(width: 8),
@@ -1331,6 +1440,10 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
         _textField(_finalCommentsCtrl, 'Final Comments',
             icon: Icons.comment, maxLines: 3),
+        const SizedBox(height: 32),
+
+        // Feedback Section (Optional)
+        _buildFeedbackSection(),
         const SizedBox(height: 24),
 
         // Summary
@@ -1362,6 +1475,151 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
   }
 
   // ── Shared UI Helpers ───────────────────────────────────
+
+  // ══════════════════════════════════════════════════════════
+  // FEEDBACK SECTION (Optional)
+  // ══════════════════════════════════════════════════════════
+
+  Widget _buildFeedbackSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.purple.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.purple.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.feedback, color: Colors.purple.shade700, size: 24),
+              const SizedBox(width: 8),
+              Text(
+                'Feedback (Optional)',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.purple.shade700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Help us improve our emergency response service',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Emoticon Rating
+          const Text(
+            'How was your experience?',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _feedbackOption(
+                emoji: '😄',
+                label: 'Excellent',
+                value: 'excellent',
+                color: Colors.green,
+              ),
+              _feedbackOption(
+                emoji: '🙂',
+                label: 'Good',
+                value: 'good',
+                color: Colors.blue,
+              ),
+              _feedbackOption(
+                emoji: '😐',
+                label: 'Fair',
+                value: 'fair',
+                color: Colors.orange,
+              ),
+              _feedbackOption(
+                emoji: '☹️',
+                label: 'Poor',
+                value: 'poor',
+                color: Colors.red,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // Comments (Optional)
+          TextField(
+            onChanged: (value) => setState(() => _form.feedbackComments = value),
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: 'Comments (Optional)',
+              hintText: 'Share your thoughts...',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              prefixIcon: const Icon(Icons.comment_outlined),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _feedbackOption({
+    required String emoji,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    final isSelected = _form.feedbackRating == value;
+    return GestureDetector(
+      onTap: () => setState(() => _form.feedbackRating = value),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isSelected ? color.withOpacity(0.1) : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected ? color : Colors.grey.shade300,
+                width: isSelected ? 2 : 1,
+              ),
+            ),
+            child: Text(
+              emoji,
+              style: TextStyle(
+                fontSize: isSelected ? 36 : 32,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? color : Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // HELPER WIDGETS
+  // ══════════════════════════════════════════════════════════
 
   Widget _stepHeader(String title, IconData icon) {
     return Padding(

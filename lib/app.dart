@@ -40,12 +40,16 @@ class _AppState extends State<App> {
   late final GeocodingService _geocodingService;
   bool _isAlerting = false;
 
+  /// GoRouter instance — created once, reused across rebuilds.
+  late final GoRouter _goRouter;
+
   @override
   void initState() {
     super.initState();
     _ttsService = TtsService();
     _ttsService.init();
     _geocodingService = GeocodingService();
+    _goRouter = _createRouter();
     
     // Register callbacks after the first frame so providers are ready
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -53,6 +57,12 @@ class _AppState extends State<App> {
       _registerLocationCallbacks();
       _listenToAuthChanges();
     });
+  }
+
+  @override
+  void dispose() {
+    _goRouter.dispose();
+    super.dispose();
   }
 
   // ── Alarm ────────────────────────────────────────────────────
@@ -120,6 +130,14 @@ class _AppState extends State<App> {
       _pendingAlertIncidents = null;
     });
   }
+
+  void _acknowledgeAndOpenIncident(int incidentId) {
+    debugPrint('🔔 Alarm: Acknowledge & Open incident #$incidentId');
+    _dismissAlert();
+    _goRouter.go('/incidents/$incidentId');
+    debugPrint('🔔 Alarm: Navigation dispatched to /incidents/$incidentId');
+  }
+
 
   double? _parseDouble(dynamic v) {
     if (v == null) return null;
@@ -310,11 +328,11 @@ class _AppState extends State<App> {
           elevation: 2,
         ),
       ),
-      routerConfig: _router(context),
+      routerConfig: _goRouter,
     );
   }
 
-  GoRouter _router(BuildContext context) {
+  GoRouter _createRouter() {
     return GoRouter(
       initialLocation: '/login',
       redirect: (BuildContext context, GoRouterState state) {
@@ -362,6 +380,7 @@ class _AppState extends State<App> {
                     child: IncidentAlertOverlay(
                       newIncidents: _pendingAlertIncidents!,
                       onDismiss: _dismissAlert,
+                      onAcknowledgeAndOpen: _acknowledgeAndOpenIncident,
                     ),
                   ),
               ],

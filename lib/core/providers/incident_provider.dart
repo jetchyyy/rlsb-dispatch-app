@@ -225,6 +225,36 @@ class IncidentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Injects a local timestamp into the incident data when an action is queued offline.
+  /// This allows the E-Street form to access timestamps even when offline.
+  void _injectLocalTimestamp(int incidentId, String action, String timestamp) {
+    debugPrint('💾 Injecting local timestamp for $action: $timestamp');
+    
+    final idx = _incidents.indexWhere((i) => i['id'] == incidentId);
+    if (idx != -1) {
+      _incidents[idx] = Map<String, dynamic>.from(_incidents[idx]);
+      if (action == 'responding') {
+        _incidents[idx]['response_started_at'] = timestamp;
+      } else if (action == 'on_scene' || action == 'on-scene') {
+        _incidents[idx]['arrived_on_scene_at'] = timestamp;
+        _incidents[idx]['on_scene_at'] = timestamp; // Fallback field
+      }
+    }
+    
+    if (_currentIncident?['id'] == incidentId) {
+      _currentIncident = Map<String, dynamic>.from(_currentIncident!);
+      if (action == 'responding') {
+        _currentIncident!['response_started_at'] = timestamp;
+      } else if (action == 'on_scene' || action == 'on-scene') {
+        _currentIncident!['arrived_on_scene_at'] = timestamp;
+        _currentIncident!['on_scene_at'] = timestamp; // Fallback field
+      }
+    }
+    
+    debugPrint('✅ Local timestamp injected into incident data');
+    notifyListeners();
+  }
+
   /// Called every auto-refresh tick. Attempts to sync any pending offline
   /// actions and forms to the server. Skips gracefully if already syncing.
   Future<void> _flushOfflineQueue() async {
@@ -284,14 +314,47 @@ class IncidentProvider extends ChangeNotifier {
       form.bodyDiagramScreenshot =
           images['body_diagram_screenshot'] ?? form.bodyDiagramScreenshot;
 
-      await api.submitForm(incidentId: pending.incidentId, form: form);
+      // Capture the server response which contains the PDF URL
+      final response = await api.submitForm(incidentId: pending.incidentId, form: form);
       await _estreetQueue.remove(pending.incidentId);
 
       debugPrint('✅ Synced offline E-Street form for #${pending.incidentId}');
+      debugPrint('📦 API Full Response: $response');
+      
+      // Store the PDF URL from the submission response
+      // Handle multiple possible response structures
+      final pdfUrl = response['pdf_url'] as String? ?? 
+                     response['data']?['pdf_url'] as String? ??
+                     response['e_street_form_pdf'] as String?;
+                     
+      if (pdfUrl != null) {
+        debugPrint('📄 ✅ Received server PDF URL: $pdfUrl');
+      } else {
+        debugPrint('⚠️ NO PDF URL in API response!');
+        debugPrint('   Available keys: ${response.keys.toList()}');
+        if (response['data'] != null) {
+          debugPrint('   Data keys: ${(response['data'] as Map?)?.keys.toList()}');
+        }
+      }
 
       // Once synced, auto-resolve the incident as per normal flow.
-      resolveIncident(pending.incidentId,
+      // resolveIncident will call fetchIncident which refreshes _currentIncident
+      await resolveIncident(pending.incidentId,
           notes: 'Auto-resolved after background offline E-Street form sync');
+
+      // After resolving, ensure the PDF URL is set in the current incident.
+      // This handles the case where the server's incident detail endpoint doesn't
+      // immediately return the e_street_form_pdf field after submission.
+      if (pdfUrl != null) {
+        injectPdfUrl(pending.incidentId, pdfUrl);
+      } else {
+        // If no PDF URL in the submit response, try fetching incident again after a delay
+        // The server might need time to save the PDF path to the database
+        debugPrint('⏳ No PDF URL found, will retry fetch after 2 seconds...');
+        await Future.delayed(const Duration(seconds: 2));
+        await fetchIncident(pending.incidentId, silent: true);
+        debugPrint('🔄 Refetched incident after delay');
+      }
 
       return true;
     } on DioException catch (e) {
@@ -643,6 +706,8 @@ class IncidentProvider extends ChangeNotifier {
 
       _parseIncidentList(response.data, activeOnly: activeOnly);
       _lastFetchTime = DateTime.now();
+      // Clear any stale errors on successful fetch
+      _errorMessage = null;
     } on DioException catch (e) {
       _handleDioError(e);
     } catch (e, stackTrace) {
@@ -718,10 +783,12 @@ class IncidentProvider extends ChangeNotifier {
       }
 
       _incidents.addAll(filteredItems);
+      _errorMessage = null; // Clear error on success
       debugPrint(
           '  ✅ Loaded ${filteredItems.length} more (total: ${_incidents.length})');
     } on DioException catch (e) {
       debugPrint('  ❌ Load more failed: ${e.message}');
+      _errorMessage = 'Failed to load more incidents';
     }
 
     _isLoadingMore = false;
@@ -751,6 +818,7 @@ class IncidentProvider extends ChangeNotifier {
 
       _parseIncidentList(response.data, activeOnly: activeOnly);
       _currentPage = page;
+      _errorMessage = null; // Clear error on success
       debugPrint('  ✅ Loaded page $page with ${_incidents.length} items');
     } on DioException catch (e) {
       _handleDioError(e);
@@ -819,6 +887,9 @@ class IncidentProvider extends ChangeNotifier {
         }
 
         _currentIncident = parsed;
+        
+        // Clear any stale errors on successful fetch
+        if (!silent) _errorMessage = null;
 
         // START DEBUG LOGGING
         debugPrint('  🔍 DEBUG: Validating Assigned User Data');
@@ -893,6 +964,13 @@ class IncidentProvider extends ChangeNotifier {
         if (hasAssignedUser) {
           final assignedName = _currentIncident?['assigned_user']?['name'];
           debugPrint('     ✅ Assigned to: $assignedName');
+        }
+
+        // Debug: Log E-Street form related fields
+        if (_currentIncident != null) {
+          debugPrint('  📋 E-Street Form Fields:');
+          debugPrint('    - e_street_form: ${_currentIncident!['e_street_form'] != null ? 'EXISTS (${(_currentIncident!['e_street_form'] as String?)?.length ?? 0} chars)' : 'NULL'}');
+          debugPrint('    - e_street_form_pdf: ${_currentIncident!['e_street_form_pdf'] ?? 'NULL'}');
         }
       }
     } on DioException catch (e) {
@@ -1026,14 +1104,18 @@ class IncidentProvider extends ChangeNotifier {
     } on DioException catch (e) {
       // ── Offline / network error → enqueue ─────────────────────
       if (isOfflineException(e)) {
+        final recordedAt = DateTime.now().toIso8601String();
         debugPrint(
             '📵 Offline — queuing ${action} for incident #$id to sync later');
         await _actionQueue.enqueue(PendingAction(
           incidentId: id,
           action: action,
-          recordedAt: DateTime.now().toIso8601String(),
+          recordedAt: recordedAt,
           notes: notes,
         ));
+
+        // Inject local timestamp into incident data for offline use
+        _injectLocalTimestamp(id, action, recordedAt);
 
         // Still trigger callbacks so GPS / response state changes happen locally
         _handleActionCallbacks(id, action);
@@ -1357,5 +1439,29 @@ class IncidentProvider extends ChangeNotifier {
   void clearCurrentIncident() {
     _currentIncident = null;
     notifyListeners();
+  }
+
+  /// Injects the PDF URL into the current incident if it's missing.
+  /// Used after form submission when the server returns a PDF URL but
+  /// the incident detail endpoint hasn't updated yet.
+  void injectPdfUrl(int incidentId, String pdfUrl) {
+    if (_currentIncident != null && _currentIncident!['id'] == incidentId) {
+      final currentPdfUrl = _currentIncident!['e_street_form_pdf'];
+      if (currentPdfUrl == null) {
+        _currentIncident!['e_street_form_pdf'] = pdfUrl;
+        debugPrint('📄 ✅ INJECTED PDF URL: $pdfUrl');
+        debugPrint('   Into incident #$incidentId');
+        notifyListeners();
+      } else {
+        debugPrint('📄 Current incident already has PDF URL: $currentPdfUrl');
+      }
+    } else {
+      if (_currentIncident == null) {
+        debugPrint('⚠️ Cannot inject PDF URL - _currentIncident is null');
+      } else {
+        debugPrint('⚠️ Cannot inject PDF URL - incident ID mismatch');
+        debugPrint('   Expected: $incidentId, Got: ${_currentIncident!['id']}');
+      }
+    }
   }
 }

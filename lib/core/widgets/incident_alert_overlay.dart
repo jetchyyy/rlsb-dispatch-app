@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 class IncidentAlertOverlay extends StatefulWidget {
   final List<Map<String, dynamic>> newIncidents;
   final VoidCallback onDismiss;
+  final void Function(int incidentId) onAcknowledgeAndOpen;
 
   const IncidentAlertOverlay({
     super.key,
     required this.newIncidents,
     required this.onDismiss,
+    required this.onAcknowledgeAndOpen,
   });
 
   @override
@@ -206,10 +208,13 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
                           width: double.infinity,
                           height: 56,
                           child: ElevatedButton.icon(
-                            onPressed: widget.onDismiss,
+                            onPressed: () {
+                              final firstIncidentId = widget.newIncidents.first['id'] as int;
+                              widget.onAcknowledgeAndOpen(firstIncidentId);
+                            },
                             icon: const Icon(Icons.check_circle, size: 28),
                             label: const Text(
-                              'ACKNOWLEDGE',
+                              'ACKNOWLEDGE & OPEN',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,

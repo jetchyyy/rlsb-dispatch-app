@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../../core/widgets/custom_button.dart';
+import '../../e_street_form/screens/e_street_form_screen.dart';
 
 class AssignmentActionScreen extends StatefulWidget {
   final int incidentId;
@@ -22,6 +23,15 @@ class AssignmentActionScreen extends StatefulWidget {
 
 class _AssignmentActionScreenState extends State<AssignmentActionScreen> {
   final _rejectionController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Fetch incident data on screen load so provider has context
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<IncidentProvider>().fetchIncident(widget.incidentId);
+    });
+  }
 
   @override
   void dispose() {
@@ -89,8 +99,20 @@ class _AssignmentActionScreenState extends State<AssignmentActionScreen> {
 
   Future<void> _updateStatus(String status) async {
     final provider = context.read<IncidentProvider>();
+    
+    // CRITICAL: Fetch the incident first so _currentIncident is set
+    // Otherwise updateAssignmentStatus will return false
+    debugPrint('🔍 Fetching incident #${widget.incidentId} before updating status to $status');
+    await provider.fetchIncident(widget.incidentId);
+    
+    if (!mounted) return;
+    
+    debugPrint('🔄 Now calling updateAssignmentStatus for assignment #${widget.assignmentId}');
     final success = await provider.updateAssignmentStatus(
         widget.assignmentId, status);
+    
+    debugPrint('✅ updateAssignmentStatus returned: $success');
+    
     if (!mounted) return;
 
     if (success) {
@@ -100,7 +122,34 @@ class _AssignmentActionScreenState extends State<AssignmentActionScreen> {
           backgroundColor: AppColors.success,
         ),
       );
+      
+      // Navigate to E-Street Form after marking "On Scene"
+      if (status == 'on_scene') {
+        debugPrint('📍 Status is on_scene - navigating to E-Street Form');
+        
+        // Get the current incident data (already fetched above)
+        final incident = provider.currentIncident;
+        
+        debugPrint('📋 Incident data: ${incident != null ? "EXISTS" : "NULL"}');
+        
+        if (incident != null && mounted) {
+          debugPrint('🚀 Pushing E-Street Form screen...');
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => EStreetFormScreen(
+                incidentId: widget.incidentId,
+                incidentData: incident,
+              ),
+            ),
+          );
+          debugPrint('✅ Returned from E-Street Form screen');
+        } else {
+          debugPrint('❌ Cannot navigate - incident is null or widget not mounted');
+        }
+      }
     } else {
+      debugPrint('❌ updateAssignmentStatus failed');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(provider.errorMessage ?? 'Failed to update'),

@@ -183,7 +183,7 @@ class EStreetFormDisplay extends StatelessWidget {
                     _detailRow(Icons.location_on, 'Time Arrived Scene',
                         formData['time_arrived_scene']),
                   if (formData['time_departed_scene'] != null)
-                    _detailRow(Icons.directions_car, 'Time Departed Scene',
+                    _detailRow(Icons.directions_car, 'Time of Departure',
                         formData['time_departed_scene']),
                   if (formData['time_arrived_hospital'] != null)
                     _detailRow(Icons.local_hospital, 'Time Arrived Hospital',

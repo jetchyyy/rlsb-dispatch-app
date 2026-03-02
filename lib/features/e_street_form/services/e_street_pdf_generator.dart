@@ -47,6 +47,10 @@ class EStreetPdfGenerator {
           _sectionTitle('Final Comments'),
           pw.Text(form.finalComments!),
         ],
+        if (form.feedbackRating != null || (form.feedbackComments != null && form.feedbackComments!.isNotEmpty)) ...[
+          pw.SizedBox(height: 12),
+          _buildFeedbackSection(form),
+        ],
       ],
     ));
 
@@ -178,7 +182,7 @@ class EStreetPdfGenerator {
         _buildGrid([
           _field('Time Called', form.timeCalled),
           _field('Arrived Scene', form.timeArrivedScene),
-          _field('Departed Scene', form.timeDepartedScene),
+          _field('Time of Departure', form.timeDepartedScene),
           _field('Arrived Hospital', form.timeArrivedHospital),
           _field('Transport Method', form.transportMethod),
           _field('Hospital', form.hospital == 'OTHER' ? form.hospitalOther : form.hospital),
@@ -244,6 +248,48 @@ class EStreetPdfGenerator {
           pw.Text(label, style: const pw.TextStyle(fontSize: 8)),
         ],
       ),
+    );
+  }
+
+  static pw.Widget _buildFeedbackSection(EStreetFormModel form) {
+    final Map<String, String> emojiMap = {
+      'excellent': '😄',
+      'good': '🙂',
+      'fair': '😐',
+      'poor': '☹️',
+    };
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('Service Feedback'),
+        if (form.feedbackRating != null) ...[
+          pw.Row(
+            children: [
+              pw.Text(
+                'Rating: ',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.Text(
+                '${emojiMap[form.feedbackRating] ?? ''} ${form.feedbackRating?.toUpperCase()}',
+                style: const pw.TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 4),
+        ],
+        if (form.feedbackComments != null && form.feedbackComments!.isNotEmpty) ...[
+          pw.Text(
+            'Comments:',
+            style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            form.feedbackComments!,
+            style: const pw.TextStyle(fontSize: 10),
+          ),
+        ],
+      ],
     );
   }
 

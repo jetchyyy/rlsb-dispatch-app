@@ -31,8 +31,6 @@ class IncidentDetailScreen extends StatefulWidget {
 class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   final _notesController = TextEditingController();
   bool _showNotes = false;
-  bool _hasShownInjuryMapper =
-      false; // Track if we've already opened the injury mapper
 
   // Status workflow: current status → next status
   static const _nextStatus = {
@@ -65,35 +63,17 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   void _checkAndOpenInjuryMapper(Map<String, dynamic>? incident) {
-    if (incident == null || _hasShownInjuryMapper) return;
-
-    final status = incident['status'] as String?;
-    if (status == 'on_scene') {
-      _hasShownInjuryMapper = true;
-
-      // Delay to ensure the detail screen is fully built
-      Future.delayed(const Duration(milliseconds: 500), () async {
-        if (!mounted) return;
-        final result = await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => EStreetFormScreen(
-              incidentId: widget.incidentId,
-              incidentData: incident,
-            ),
-          ),
-        );
-
-        if (result is Map && result['openPdf'] != null && mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PdfViewerScreen(pdfUrl: result['openPdf']),
-            ),
-          );
-        }
-      });
-    }
+    // Auto-open feature disabled to prevent timing issues with timestamp sync
+    // User can manually open E-Street form via button
+    return;
+    
+    // Original code kept for reference (disabled):
+    // if (incident == null || _hasShownInjuryMapper) return;
+    // final status = incident['status'] as String?;
+    // if (status == 'on_scene') {
+    //   _hasShownInjuryMapper = true;
+    //   ...
+    // }
   }
 
   @override
@@ -250,17 +230,52 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                     if (status != 'on_scene') {
                       debugPrint(
                           '📍 Auto-marking On Scene before opening E-Street Form');
-                      await ip.markOnScene(widget.incidentId);
+                      final success = await ip.markOnScene(widget.incidentId);
+                      
+                      if (!success) {
+                        debugPrint('⚠️ Failed to mark on-scene');
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Failed to mark on-scene. Please try again.'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      
+                      // If online, wait for server to process and update timestamp
+                      if (!ip.hasPendingFor(widget.incidentId)) {
+                        debugPrint('📍 Online: Waiting for server to update timestamp...');
+                        await Future.delayed(const Duration(milliseconds: 800));
+                        
+                        if (!context.mounted) return;
+                        
+                        // Fetch fresh data from server
+                        debugPrint('📍 Fetching fresh incident data from server...');
+                        await ip.fetchIncident(widget.incidentId);
+                      } else {
+                        debugPrint('📵 Offline: Using locally stored timestamp');
+                      }
                     }
 
                     if (!context.mounted) return;
+
+                    // Get the current incident data (has local timestamp if offline)
+                    var refreshedIncident = ip.currentIncident;
+                    
+                    debugPrint('📍 Opening E-Street Form with incident data:');
+                    debugPrint('  - Status: ${refreshedIncident?['status']}');
+                    debugPrint('  - arrived_on_scene_at: ${refreshedIncident?['arrived_on_scene_at']}');
+                    debugPrint('  - on_scene_at: ${refreshedIncident?['on_scene_at']}');
+                    debugPrint('  - Has pending offline action: ${ip.hasPendingFor(widget.incidentId)}');
 
                     final result = await Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => EStreetFormScreen(
                           incidentId: widget.incidentId,
-                          incidentData: incident,
+                          incidentData: refreshedIncident ?? incident,
                         ),
                       ),
                     );
@@ -500,13 +515,25 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 ),
                 // E-Street Form button
                 IconButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    // Only fetch if online (not in offline queue)
+                    if (!ip.hasPendingFor(widget.incidentId)) {
+                      // Online: fetch the latest incident data
+                      debugPrint('📍 Fetching latest incident data from server...');
+                      await ip.fetchIncident(widget.incidentId);
+                    } else {
+                      debugPrint('📵 Offline mode: Using locally stored incident data');
+                    }
+                    
+                    if (!context.mounted) return;
+                    
+                    final refreshedIncident = ip.currentIncident;
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (_) => EStreetFormScreen(
                           incidentId: widget.incidentId,
-                          incidentData: incident,
+                          incidentData: refreshedIncident ?? incident,
                         ),
                       ),
                     );
@@ -579,6 +606,15 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     String label, {
     Map<String, dynamic>? assignedUser,
   }) async {
+    debugPrint('');
+    debugPrint('═══════════════════════════════════════════════════');
+    debugPrint('🔄 STATUS CHANGE INITIATED');
+    debugPrint('═══════════════════════════════════════════════════');
+    debugPrint('  📋 Incident ID: $incidentId');
+    debugPrint('  📍 Next Status: $nextStatus');
+    debugPrint('  🏷️ Label: $label');
+    debugPrint('');
+    
     String message =
         'Are you sure you want to update this incident status to "${nextStatus.replaceAll('_', ' ')}"?';
 
@@ -611,12 +647,20 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       ),
     );
 
-    if (confirmed != true || !mounted) return;
+    debugPrint('  ✅ User confirmed: $confirmed');
+
+    if (confirmed != true || !mounted) {
+      debugPrint('  ❌ User cancelled or widget unmounted');
+      return;
+    }
 
     final notes = _notesController.text.trim();
+    debugPrint('  📝 Notes: ${notes.isEmpty ? "(none)" : notes}');
 
     // Call the appropriate action method based on next status
     bool success;
+    debugPrint('  🔄 Calling API for status: $nextStatus');
+    
     switch (nextStatus) {
       case 'acknowledged':
         success = await ip.acknowledgeIncident(
@@ -631,10 +675,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         );
         break;
       case 'on_scene':
+        debugPrint('  📍 Calling markOnScene...');
         success = await ip.markOnScene(
           incidentId,
           notes: notes.isNotEmpty ? notes : null,
         );
+        debugPrint('  📍 markOnScene returned: $success');
         break;
       case 'resolved':
         success = await ip.resolveIncident(
@@ -662,10 +708,16 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
             backgroundColor: AppColors.error,
           ),
         );
+        debugPrint('  ❌ Unknown action: $nextStatus');
         return;
     }
 
-    if (!mounted) return;
+    debugPrint('  ✅ API call success: $success');
+
+    if (!mounted) {
+      debugPrint('  ❌ Widget unmounted after API call');
+      return;
+    }
 
     if (success) {
       _notesController.clear();
@@ -677,7 +729,68 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           backgroundColor: AppColors.success,
         ),
       );
+      
+      // Navigate to E-Street Form after marking "On Scene"
+      if (nextStatus == 'on_scene' && mounted) {
+        debugPrint('');
+        debugPrint('═══════════════════════════════════════════════════');
+        debugPrint('📍 ON SCENE - NAVIGATING TO E-STREET FORM');
+        debugPrint('═══════════════════════════════════════════════════');
+        
+        // Get the current incident data
+        final incident = ip.currentIncident;
+        
+        debugPrint('  📋 Incident data exists: ${incident != null}');
+        if (incident != null) {
+          debugPrint('  📋 Incident ID: ${incident['id']}');
+          debugPrint('  📋 Incident Status: ${incident['status']}');
+          debugPrint('  📋 Widget still mounted: $mounted');
+        }
+        
+        if (incident != null && mounted) {
+          debugPrint('  🚀 All checks passed - pushing E-Street Form screen...');
+          
+          // Use a small delay to ensure the success message is shown
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          if (!mounted) {
+            debugPrint('  ❌ Widget unmounted after delay');
+            return;
+          }
+          
+          debugPrint('  🚀 Calling Navigator.push...');
+          
+          try {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => EStreetFormScreen(
+                  incidentId: incidentId,
+                  incidentData: incident,
+                ),
+              ),
+            );
+            debugPrint('  ✅ Returned from E-Street Form screen');
+          } catch (e) {
+            debugPrint('  ❌ Error pushing E-Street Form: $e');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error opening E-Street Form: $e'),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+        } else {
+          debugPrint('  ❌ Cannot navigate:');
+          debugPrint('     - Incident is null: ${incident == null}');
+          debugPrint('     - Widget not mounted: ${!mounted}');
+        }
+        
+        debugPrint('═══════════════════════════════════════════════════');
+        debugPrint('');
+      }
     } else {
+      debugPrint('  ❌ API call failed');  
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ip.errorMessage ?? 'Failed to update status'),
@@ -685,6 +798,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
         ),
       );
     }
+    
+    debugPrint('═══════════════════════════════════════════════════');
+    debugPrint('');
   }
 
   Widget _buildContent(
