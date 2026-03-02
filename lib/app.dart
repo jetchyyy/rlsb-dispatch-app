@@ -143,13 +143,13 @@ class _AppState extends State<App> {
       final restoredIncidentId = responseProvider.activeIncidentId!;
       debugPrint(
           '🔄 App: Detected restored active incident #$restoredIncidentId → resuming active tracking');
-      
+
       // Resume active GPS tracking for the restored incident
       locationProvider.startActiveTracking(restoredIncidentId);
-      
+
       // Sync the response status
       locationProvider.responseStatus = responseProvider.responseStatus;
-      
+
       // Update background service notification
       BackgroundServiceInitializer.setTrackingMode('active',
           incidentId: restoredIncidentId);
@@ -157,7 +157,7 @@ class _AppState extends State<App> {
         'PDRRMO Dispatch',
         'Active tracking — responding to incident #$restoredIncidentId',
       );
-      
+
       debugPrint(
           '✅ App: Active tracking resumed with status="${responseProvider.responseStatus}"');
     }
@@ -196,7 +196,7 @@ class _AppState extends State<App> {
         final incidentProvider = context.read<IncidentProvider>();
         final user = authProvider.user;
         if (user != null) {
-          final unit = user.unit;  // Use the `unit` field from users table
+          final unit = user.unit; // Use the `unit` field from users table
           final isAdmin = user.isAdmin;
           incidentProvider.setUserUnit(unit, isAdmin: isAdmin);
           debugPrint(
@@ -272,7 +272,7 @@ class _AppState extends State<App> {
                 // when actively responding to an incident.
                 Consumer<IncidentResponseProvider>(
                   builder: (context, rp, _) {
-                    if (!rp.isRespondingToIncident) {
+                    if (!rp.isRespondingToIncident || rp.isBannerHidden) {
                       return child;
                     }
                     // Reserve space at the top for the response banner

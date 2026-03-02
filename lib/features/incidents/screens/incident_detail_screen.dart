@@ -10,10 +10,12 @@ import '../../../core/providers/incident_provider.dart';
 import '../../../core/providers/incident_response_provider.dart';
 // import '../../../core/providers/auth_provider.dart';
 import '../../../features/auth/presentation/providers/auth_provider.dart';
+import '../../../core/widgets/sync_status_banner.dart';
 import '../../e_street_form/screens/e_street_form_screen.dart';
 import '../../e_street_form/models/e_street_form_model.dart';
 import '../../e_street_form/services/e_street_local_storage.dart';
 import '../../e_street_form/services/e_street_pdf_generator.dart';
+import '../../e_street_form/services/offline_estreet_queue.dart';
 import '../../e_street_form/widgets/e_street_form_data_display.dart';
 import '../../e_street_form/screens/pdf_viewer_screen.dart';
 
@@ -105,7 +107,30 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 
   /// Helper to convert e_street_form to JSON string if it's a Map
+  /// OR load the locally saved pending offline form if available.
   String? _getEStreetFormJson(dynamic eStreetForm) {
+    if (!mounted) return null; // Safety check for widget
+
+    try {
+      // 1. Check Offline Queue First
+      // If we just saved an E-Street form offline, show it here immediately
+      final offlineQueue = OfflineEStreetQueue();
+      if (offlineQueue.hasPendingFor(widget.incidentId)) {
+        final pendingActions = offlineQueue
+            .getAll()
+            .where((f) => f.incidentId == widget.incidentId)
+            .toList();
+        if (pendingActions.isNotEmpty) {
+          final pendingAction = pendingActions.last;
+          debugPrint('📥 Dashboard: Displaying offline pending E-Street Form');
+          return jsonEncode(pendingAction.form.toJson());
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching offline E-Street form: $e');
+    }
+
+    // 2. Fallback to Server Payload
     if (eStreetForm == null) return null;
     if (eStreetForm is String) return eStreetForm;
     if (eStreetForm is Map) {
@@ -164,7 +189,12 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   ? const Center(child: Text('Incident not found'))
                   : RefreshIndicator(
                       onRefresh: () => ip.fetchIncident(widget.incidentId),
-                      child: _buildContent(context, incident, ip),
+                      child: Column(
+                        children: [
+                          const SyncStatusBanner(),
+                          Expanded(child: _buildContent(context, incident, ip)),
+                        ],
+                      ),
                     ),
       bottomNavigationBar:
           incident != null ? _buildActionBar(context, incident, ip) : null,
@@ -352,6 +382,91 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   ],
                 ),
               ),
+
+            // Pending offline sync banner
+            if (ip.hasPendingFor(widget.incidentId) ||
+                ip.hasPendingEStreetFormFor(widget.incidentId))
+              Builder(builder: (context) {
+                final hasAction = ip.hasPendingFor(widget.incidentId);
+                final hasForm = ip.hasPendingEStreetFormFor(widget.incidentId);
+
+                String pendingText = '';
+                if (hasAction && hasForm) {
+                  pendingText = 'Action & E-Street Form saved offline';
+                } else if (hasForm) {
+                  pendingText = 'E-Street Form saved offline';
+                } else {
+                  final pendingAction =
+                      ip.latestPendingActionFor(widget.incidentId);
+                  final pendingLabel = {
+                        'acknowledged': 'Acknowledge',
+                        'responding': 'Respond',
+                        'on_scene': 'On Scene',
+                        'resolved': 'Resolve',
+                        'closed': 'Close',
+                        'cancelled': 'Cancel',
+                      }[pendingAction] ??
+                      pendingAction ??
+                      'Action';
+                  pendingText = '"$pendingLabel" saved offline';
+                }
+
+                // If currently syncing, change text to "Uploading..."
+                if (ip.isSyncing) {
+                  if (hasAction && hasForm) {
+                    pendingText = 'Uploading Action & Form...';
+                  } else if (hasForm) {
+                    pendingText = 'Uploading E-Street Form...';
+                  } else {
+                    pendingText = 'Uploading Action...';
+                  }
+                } else {
+                  pendingText += ' — will sync when connected';
+                }
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: ip.isSyncing
+                        ? Colors.blue.shade50
+                        : Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: ip.isSyncing
+                            ? Colors.blue.shade300
+                            : Colors.orange.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(ip.isSyncing ? Icons.cloud_upload : Icons.wifi_off,
+                          size: 16,
+                          color: ip.isSyncing ? Colors.blue : Colors.orange),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          pendingText,
+                          style: TextStyle(
+                            color: ip.isSyncing ? Colors.blue : Colors.orange,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (ip.isSyncing)
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.blue,
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              }),
 
             // Optional notes toggle
             if (_showNotes) ...[

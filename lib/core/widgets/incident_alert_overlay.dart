@@ -17,13 +17,21 @@ class IncidentAlertOverlay extends StatefulWidget {
 }
 
 class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
+  // Flash animation (red pulse)
   late final AnimationController _flashController;
   late final Animation<double> _flashAnimation;
+
+  // Entrance animation (fade + slide-up)
+  late final AnimationController _entranceController;
+  late final Animation<double> _fadeAnimation;
+  late final Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
+
+    // ── Red flash ────────────────────────────────────────────
     _flashController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
@@ -32,11 +40,34 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
     _flashAnimation = Tween<double>(begin: 0.0, end: 0.6).animate(
       CurvedAnimation(parent: _flashController, curve: Curves.easeInOut),
     );
+
+    // ── Entrance: fast fade + slide-up (150 ms) ──────────────
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+
+    _fadeAnimation = CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOut,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0.0, 0.08), // subtle upward slide
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _entranceController,
+      curve: Curves.easeOut,
+    ));
+
+    // Start entrance animation immediately
+    _entranceController.forward();
   }
 
   @override
   void dispose() {
     _flashController.dispose();
+    _entranceController.dispose();
     super.dispose();
   }
 
@@ -99,104 +130,110 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Stack(
-        children: [
-          // ── Red flash background ──────────────────────────
-          AnimatedBuilder(
-            animation: _flashAnimation,
-            builder: (context, child) {
-              return Container(
-                color: Colors.red.withValues(alpha: _flashAnimation.value),
-              );
-            },
-          ),
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Material(
+          color: Colors.transparent,
+          child: Stack(
+            children: [
+              // ── Red flash background ──────────────────────────
+              AnimatedBuilder(
+                animation: _flashAnimation,
+                builder: (context, child) {
+                  return Container(
+                    color: Colors.red.withValues(alpha: _flashAnimation.value),
+                  );
+                },
+              ),
 
-          // ── Content ───────────────────────────────────────
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Alert icon
-                    const Icon(
-                      Icons.notification_important,
-                      size: 72,
-                      color: Colors.white,
-                    ),
-                    const SizedBox(height: 12),
+              // ── Content ───────────────────────────────────────
+              SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Alert icon
+                        const Icon(
+                          Icons.notification_important,
+                          size: 72,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(height: 12),
 
-                    // Title
-                    Text(
-                      widget.newIncidents.length == 1
-                          ? 'NEW INCIDENT'
-                          : '${widget.newIncidents.length} NEW INCIDENTS',
-                      style: const TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        letterSpacing: 2,
-                        shadows: [
-                          Shadow(blurRadius: 12, color: Colors.black54),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Incident cards
-                    ...widget.newIncidents
-                        .take(5)
-                        .map((inc) => _buildIncidentCard(inc)),
-
-                    if (widget.newIncidents.length > 5)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          '+${widget.newIncidents.length - 5} more',
+                        // Title
+                        Text(
+                          widget.newIncidents.length == 1
+                              ? 'NEW INCIDENT'
+                              : '${widget.newIncidents.length} NEW INCIDENTS',
                           style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 2,
+                            shadows: [
+                              Shadow(blurRadius: 12, color: Colors.black54),
+                            ],
                           ),
                         ),
-                      ),
+                        const SizedBox(height: 24),
 
-                    const SizedBox(height: 32),
+                        // Incident cards
+                        ...widget.newIncidents
+                            .take(5)
+                            .map((inc) => _buildIncidentCard(inc)),
 
-                    // Acknowledge button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed: widget.onDismiss,
-                        icon: const Icon(Icons.check_circle, size: 28),
-                        label: const Text(
-                          'ACKNOWLEDGE',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
+                        if (widget.newIncidents.length > 5)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              '+${widget.newIncidents.length - 5} more',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+
+                        const SizedBox(height: 32),
+
+                        // Acknowledge button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton.icon(
+                            onPressed: widget.onDismiss,
+                            icon: const Icon(Icons.check_circle, size: 28),
+                            label: const Text(
+                              'ACKNOWLEDGE',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.red.shade800,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 8,
+                            ),
                           ),
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.red.shade800,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          elevation: 8,
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

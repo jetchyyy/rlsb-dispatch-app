@@ -44,6 +44,9 @@ class IncidentResponseProvider extends ChangeNotifier {
   double? _incidentLat;
   double? _incidentLng;
 
+  /// Whether the response banner has been manually hidden by the user.
+  bool _isBannerHidden = false;
+
   /// Timer to auto-reset state after completing an incident.
   Timer? _resetTimer;
 
@@ -69,6 +72,7 @@ class IncidentResponseProvider extends ChangeNotifier {
   DateTime? get completionTime => _completionTime;
   double? get incidentLat => _incidentLat;
   double? get incidentLng => _incidentLng;
+  bool get isBannerHidden => _isBannerHidden;
 
   /// Computed response time (dispatch → arrival). Null if not yet arrived.
   Duration? get responseTimeElapsed {
@@ -111,11 +115,18 @@ class IncidentResponseProvider extends ChangeNotifier {
     _completionTime = null;
     _incidentLat = lat;
     _incidentLng = lng;
+    _isBannerHidden = false;
 
     debugPrint(
         '🚨 IncidentResponse: accepted incident #$incidentId — status=$_responseStatus');
     notifyListeners();
     _saveState();
+  }
+
+  /// Hides the response banner manually.
+  void hideBanner() {
+    _isBannerHidden = true;
+    notifyListeners();
   }
 
   /// Manually mark the responder as en route.
@@ -187,6 +198,7 @@ class IncidentResponseProvider extends ChangeNotifier {
     _completionTime = null;
     _incidentLat = null;
     _incidentLng = null;
+    _isBannerHidden = false;
 
     debugPrint('🚨 IncidentResponse: state reset to available');
     notifyListeners();

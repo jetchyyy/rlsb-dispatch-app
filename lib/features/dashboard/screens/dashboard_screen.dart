@@ -70,12 +70,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     final incident = newIncidents.first; // Handle the first one for now
     final lat = _parseDouble(incident['latitude']);
     final lng = _parseDouble(incident['longitude']);
-    String locationText = 'Unknown location';
+    String locationText = incident['location_address']?.toString() ??
+        incident['location_description']?.toString() ??
+        'Unknown location';
 
-    // 1. Fetch Address (Reverse Geocoding)
-    if (lat != null && lng != null) {
-      final address = await _geocodingService.getAddress(lat, lng);
-      if (address != null) locationText = address;
+    // 1. Fetch Address (Reverse Geocoding) ONLY if address is missing
+    if (locationText == 'Unknown location' && lat != null && lng != null) {
+      try {
+        final address = await _geocodingService.getAddress(lat, lng);
+        if (address != null) locationText = address;
+      } catch (_) {}
     }
 
     // 2. Prepare TTS Message
@@ -99,7 +103,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
 
     // Ensure volume is up for TTS
-    await _ttsService.speak(speech);
+    _ttsService.speak(speech);
 
     // 4. Show Visual Alert
     if (mounted) {

@@ -41,7 +41,8 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
   Widget build(BuildContext context) {
     final rp = context.watch<IncidentResponseProvider>();
 
-    if (!rp.isRespondingToIncident) return const SizedBox.shrink();
+    if (!rp.isRespondingToIncident || rp.isBannerHidden)
+      return const SizedBox.shrink();
 
     final statusColor = _getStatusColor(rp.responseStatus);
     final elapsed = rp.totalElapsed;
@@ -106,7 +107,13 @@ class _ResponseStatusBannerState extends State<ResponseStatusBanner> {
                   ],
                 ),
               ),
-              // PopupMenuButton removed per user request (actions are handled in incident detail)
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70),
+                tooltip: 'Hide Banner',
+                onPressed: () {
+                  context.read<IncidentResponseProvider>().hideBanner();
+                },
+              ),
             ],
           ),
         ),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,24 +57,35 @@ class EStreetApiService {
 
     rawData.forEach((key, value) {
       if (value is List) {
-        for (final item in value) {
-          formData.fields.add(MapEntry('$key[]', item.toString()));
+        if (value.isNotEmpty) {
+          for (final item in value) {
+            formData.fields.add(MapEntry('$key[]', item.toString()));
+          }
         }
       } else if (value is Map) {
-        // Maps must be JSON-encoded before adding to FormData
-        formData.fields.add(MapEntry(key, jsonEncode(value)));
+        if (value.isNotEmpty) {
+          // Maps must be JSON-encoded before adding to FormData
+          formData.fields.add(MapEntry(key, jsonEncode(value)));
+        }
       } else {
         formData.fields.add(MapEntry(key, value.toString()));
       }
     });
 
-    final response = await _dio.post(
-      endpoint,
-      data: formData,
-      options: Options(contentType: 'multipart/form-data'),
-    );
+    try {
+      final response = await _dio.post(
+        endpoint,
+        data: formData,
+        options: Options(contentType: 'multipart/form-data'),
+      );
 
-    return Map<String, dynamic>.from(response.data as Map);
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      debugPrint(
+          '🚨 EStreetApiService submit error: ${e.response?.statusCode}');
+      debugPrint('🚨 Response Data: ${e.response?.data}');
+      rethrow;
+    }
   }
 
   /// Fetch an existing E-Street Form for the given incident.

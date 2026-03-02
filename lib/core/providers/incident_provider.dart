@@ -6,15 +6,27 @@ import 'package:flutter/foundation.dart';
 import '../constants/api_constants.dart';
 import '../network/api_client.dart';
 import '../services/incident_alarm_service.dart';
+import '../services/offline_action_queue.dart';
+import '../../features/e_street_form/models/e_street_form_model.dart';
+import '../../features/e_street_form/services/offline_estreet_queue.dart';
+import '../../features/e_street_form/services/e_street_api_service.dart';
+import '../../features/e_street_form/services/e_street_local_storage.dart';
 
 /// Manages incident list, detail, statistics, and CRUD state
 /// with detailed debug logging.
 class IncidentProvider extends ChangeNotifier {
   final ApiClient _api;
   final IncidentAlarmService alarmService;
+  final OfflineActionQueue _actionQueue = OfflineActionQueue();
+  final OfflineEStreetQueue _estreetQueue = OfflineEStreetQueue();
 
   IncidentProvider(this._api, {IncidentAlarmService? alarmService})
-      : alarmService = alarmService ?? IncidentAlarmService();
+      : alarmService = alarmService ?? IncidentAlarmService() {
+    // Initialize the offline queue asynchronously — safe because usage is
+    // always after the first frame (buttons are only visible post-login).
+    _actionQueue.init();
+    _estreetQueue.init();
+  }
 
   // ── State ──────────────────────────────────────────────────
 
@@ -24,6 +36,7 @@ class IncidentProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _isLoadingMore = false;
   bool _isSubmitting = false;
+  bool _isSyncing = false;
   String? _errorMessage;
   DateTime? _lastFetchTime;
 
@@ -91,6 +104,9 @@ class IncidentProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isLoadingMore => _isLoadingMore;
   bool get isSubmitting => _isSubmitting;
+  bool get isSyncing => _isSyncing;
+  bool get hasPendingActions => _actionQueue.hasPending;
+  bool get hasPendingEStreetForms => _estreetQueue.hasPending;
   String? get errorMessage => _errorMessage;
   DateTime? get lastFetchTime => _lastFetchTime;
   int get incidentCount => _incidents.length;
@@ -98,6 +114,18 @@ class IncidentProvider extends ChangeNotifier {
   bool get hasMore => _currentPage < _lastPage;
   int get currentPage => _currentPage;
   int get lastPage => _lastPage;
+
+  /// Whether there is a pending (offline-queued) action for [incidentId].
+  bool hasPendingFor(int incidentId) => _actionQueue.hasPendingFor(incidentId);
+
+  /// Whether there is a pending (offline-queued) E-Street form for [incidentId].
+  bool hasPendingEStreetFormFor(int incidentId) =>
+      _estreetQueue.hasPendingFor(incidentId);
+
+  /// Returns the action string of the latest pending action for [incidentId],
+  /// or null if there is none.
+  String? latestPendingActionFor(int incidentId) =>
+      _actionQueue.latestFor(incidentId)?.action;
 
   String? get statusFilter => _statusFilter;
   String? get severityFilter => _severityFilter;
@@ -141,17 +169,20 @@ class IncidentProvider extends ChangeNotifier {
 
   // ── Auto-refresh ───────────────────────────────────────────
 
-  void startAutoRefresh({Duration interval = const Duration(seconds: 5)}) {
+  void startAutoRefresh({Duration interval = const Duration(seconds: 3)}) {
     stopAutoRefresh();
     debugPrint('⏱️ Auto-refresh started (every ${interval.inSeconds}s)');
     _refreshTimer = Timer.periodic(interval, (_) {
-      debugPrint('⏱️ Auto-refresh tick');
+      if (kDebugMode) debugPrint('⏱️ Auto-refresh tick');
       fetchIncidents(silent: true, activeOnly: _activeOnly);
 
       // Also refresh the currently viewed incident detail if active
       if (_currentIncident?['id'] != null) {
         fetchIncident(_currentIncident!['id'], silent: true);
       }
+
+      // Try to flush any offline-queued actions
+      _flushOfflineQueue();
     });
   }
 
@@ -165,6 +196,196 @@ class IncidentProvider extends ChangeNotifier {
     stopAutoRefresh();
     alarmService.dispose();
     super.dispose();
+  }
+
+  // ── Offline Queue ───────────────────────────────────────────
+
+  /// Robust helper to determine if a DioException is due to network failure.
+  bool isOfflineException(DioException e) {
+    return e.response == null ||
+        e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.unknown;
+  }
+
+  /// Applies an optimistic status update to the in-memory incident list and
+  /// current incident so the UI reflects the new state immediately.
+  void _applyOptimisticStatus(int incidentId, String status) {
+    final idx = _incidents.indexWhere((i) => i['id'] == incidentId);
+    if (idx != -1) {
+      _incidents[idx] = Map<String, dynamic>.from(_incidents[idx])
+        ..['status'] = status;
+    }
+    if (_currentIncident?['id'] == incidentId) {
+      _currentIncident = Map<String, dynamic>.from(_currentIncident!)
+        ..['status'] = status;
+    }
+    notifyListeners();
+  }
+
+  /// Called every auto-refresh tick. Attempts to sync any pending offline
+  /// actions and forms to the server. Skips gracefully if already syncing.
+  Future<void> _flushOfflineQueue() async {
+    if (_isSyncing) return;
+    if (!_actionQueue.hasPending && !_estreetQueue.hasPending) return;
+
+    _isSyncing = true;
+    notifyListeners(); // Trigger UI rebuild to show "Uploading..."
+
+    // 1. Sync actions (e.g., acknowledged, responding, on_scene)
+    if (_actionQueue.hasPending) {
+      final pending = _actionQueue.getAll();
+      debugPrint('🔄 OfflineQueue flush: ${pending.length} action(s) to sync');
+      for (final action in pending) {
+        final success = await _syncPendingAction(action);
+        if (!success) {
+          // Still offline — stop attempting, try again next tick
+          break;
+        }
+      }
+    }
+
+    // 2. Sync E-Street Forms
+    if (_estreetQueue.hasPending) {
+      final pendingForms = _estreetQueue.getAll();
+      debugPrint(
+          '🔄 OfflineEStreetQueue flush: ${pendingForms.length} form(s) to sync');
+      for (final formLog in pendingForms) {
+        final success = await _syncPendingEStreetForm(formLog);
+        if (!success) {
+          // Still offline
+          break;
+        }
+      }
+    }
+
+    _isSyncing = false;
+    notifyListeners();
+  }
+
+  /// Sends a single [PendingEStreetForm] to the server.
+  Future<bool> _syncPendingEStreetForm(PendingEStreetForm pending) async {
+    debugPrint('📡 Syncing offline E-Street form for #${pending.incidentId}');
+    try {
+      final api = await EStreetApiService.create();
+
+      // Load saved images back into the form before submitting
+      final images =
+          await EStreetLocalStorage.loadAllImages(pending.incidentId);
+      final form = pending.form;
+
+      form.patientSignature =
+          images['patient_signature'] ?? form.patientSignature;
+      form.doctorSignature = images['doctor_signature'] ?? form.doctorSignature;
+      form.responderSignature =
+          images['responder_signature'] ?? form.responderSignature;
+      form.bodyDiagramScreenshot =
+          images['body_diagram_screenshot'] ?? form.bodyDiagramScreenshot;
+
+      await api.submitForm(incidentId: pending.incidentId, form: form);
+      await _estreetQueue.remove(pending.incidentId);
+
+      debugPrint('✅ Synced offline E-Street form for #${pending.incidentId}');
+
+      // Once synced, auto-resolve the incident as per normal flow.
+      resolveIncident(pending.incidentId,
+          notes: 'Auto-resolved after background offline E-Street form sync');
+
+      return true;
+    } on DioException catch (e) {
+      if (isOfflineException(e)) {
+        debugPrint(
+            '📵 Still offline — will retry E-Street form sync for #${pending.incidentId} later');
+        return false; // Stop syncing and try again later
+      }
+
+      // Server error (e.g., validation failed) — discard it to unblock the queue
+      debugPrint(
+          '❌ Server rejected offline E-Street form for #${pending.incidentId}: ${e.response?.statusCode}');
+      await _estreetQueue.remove(pending.incidentId);
+      return true;
+    } catch (e) {
+      debugPrint('❌ Unexpected error syncing offline E-Street form: $e');
+      return false;
+    }
+  }
+
+  /// Sends a single [PendingAction] to the server.
+  /// Returns true on success (removes from queue), false on network failure.
+  Future<bool> _syncPendingAction(PendingAction action) async {
+    final endpoint = _endpointForAction(action.incidentId, action.action);
+    if (endpoint == null) return true; // Unknown action — discard
+
+    debugPrint(
+        '📡 Syncing offline action: ${action.action} for #${action.incidentId} (recorded ${action.recordedAt})');
+    try {
+      final data = <String, dynamic>{
+        // Pass the original timestamp so the server records the real time
+        'recorded_at': action.recordedAt,
+        if (action.notes != null && action.notes!.isNotEmpty)
+          'notes': action.notes,
+      };
+      await _api.post(endpoint, data: data);
+      await _actionQueue.remove(action.incidentId, action.action);
+      debugPrint(
+          '✅ Synced offline action: ${action.action} for #${action.incidentId}');
+
+      // Refresh the detail if it's the currently viewed incident
+      if (_currentIncident?['id'] == action.incidentId) {
+        fetchIncident(action.incidentId, silent: true);
+      }
+      return true;
+    } on DioException catch (e) {
+      if (isOfflineException(e)) {
+        debugPrint(
+            '📵 Still offline/flaky — will retry ${action.action} for #${action.incidentId} later');
+        return false;
+      }
+      // Server error (4xx/5xx) — discard so it doesn't block the queue forever
+      debugPrint(
+          '❌ Server rejected offline action ${action.action} for #${action.incidentId}: ${e.response?.statusCode}');
+      await _actionQueue.remove(action.incidentId, action.action);
+      return true;
+    } catch (e) {
+      debugPrint('❌ Unexpected error syncing offline action: $e');
+      return false;
+    }
+  }
+
+  String? _endpointForAction(int id, String action) {
+    switch (action) {
+      case 'acknowledged':
+        return ApiConstants.incidentAcknowledge(id);
+      case 'responding':
+        return ApiConstants.incidentRespond(id);
+      case 'on_scene':
+      case 'on-scene':
+        return ApiConstants.incidentOnScene(id);
+      case 'resolved':
+        return ApiConstants.incidentResolve(id);
+      case 'closed':
+        return ApiConstants.incidentClose(id);
+      case 'cancelled':
+        return ApiConstants.incidentCancel(id);
+      default:
+        return null;
+    }
+  }
+
+  /// Enqueue an E-Street form to be submitted later when offline
+  Future<void> enqueueEStreetForm(int incidentId, EStreetFormModel form) async {
+    await _estreetQueue.enqueue(PendingEStreetForm(
+      incidentId: incidentId,
+      form: form,
+      recordedAt: DateTime.now().toIso8601String(),
+    ));
+    debugPrint('📝 E-Street form queued offline for incident #$incidentId');
+
+    // Optimistically resolve the incident so they don't have to wait
+    _applyOptimisticStatus(incidentId, 'resolved');
+    notifyListeners();
   }
 
   // ── Set Filters ────────────────────────────────────────────
@@ -194,38 +415,40 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   // ── Filter Today and Active ────────────────────────────────────────────
-  
+
   void filterTodayAndActive() {
     final today = DateTime.now();
     final todayStart = DateTime(today.year, today.month, today.day);
-    
+
     // Keep original list for reference
     final allIncidents = List<Map<String, dynamic>>.from(_incidents);
-    
+
     // Filter to show: active incidents OR incidents resolved/closed/cancelled today
     _incidents = allIncidents.where((incident) {
       final status = incident['status']?.toString().toLowerCase() ?? '';
-      
+
       // Always show active incidents (not resolved/closed/cancelled)
       if (status != 'resolved' && status != 'closed' && status != 'cancelled') {
         return true;
       }
-      
+
       // For resolved/closed/cancelled, check if it happened today
       final updatedAtStr = incident['updated_at']?.toString();
       if (updatedAtStr != null) {
         try {
           final updatedAt = DateTime.parse(updatedAtStr);
-          return updatedAt.isAfter(todayStart) && updatedAt.isBefore(todayStart.add(Duration(days: 1)));
+          return updatedAt.isAfter(todayStart) &&
+              updatedAt.isBefore(todayStart.add(Duration(days: 1)));
         } catch (e) {
           return false;
         }
       }
-      
+
       return false;
     }).toList();
-    
-    debugPrint('📊 Dashboard filter: ${allIncidents.length} total → ${_incidents.length} (active + resolved today)');
+
+    debugPrint(
+        '📊 Dashboard filter: ${allIncidents.length} total → ${_incidents.length} (active + resolved today)');
     notifyListeners();
   }
 
@@ -234,7 +457,8 @@ class IncidentProvider extends ChangeNotifier {
     int limit = 15,
     bool activeOnly = false,
   }) {
-    debugPrint('🔍 _buildQueryParams called: activeOnly=$activeOnly, _statusFilter=$_statusFilter');
+    debugPrint(
+        '🔍 _buildQueryParams called: activeOnly=$activeOnly, _statusFilter=$_statusFilter');
     final params = <String, dynamic>{'limit': limit, 'page': page ?? 1};
     if (_statusFilter != null) params['status'] = _statusFilter;
     if (_severityFilter != null) params['severity'] = _severityFilter;
@@ -247,10 +471,12 @@ class IncidentProvider extends ChangeNotifier {
 
     // Exclude completed incidents when activeOnly is true and no specific status filter
     if (activeOnly && _statusFilter == null) {
-      debugPrint('✅ Applying activeOnly filter: status_not=resolved,closed,cancelled');
+      debugPrint(
+          '✅ Applying activeOnly filter: status_not=resolved,closed,cancelled');
       params['status_not'] = 'resolved,closed,cancelled';
     } else {
-      debugPrint('❌ NOT applying activeOnly filter (activeOnly=$activeOnly, _statusFilter=$_statusFilter)');
+      debugPrint(
+          '❌ NOT applying activeOnly filter (activeOnly=$activeOnly, _statusFilter=$_statusFilter)');
     }
 
     // ── Unit-based server-side filter ────────────────────────
@@ -368,7 +594,7 @@ class IncidentProvider extends ChangeNotifier {
   }) async {
     // Store the activeOnly preference so auto-refresh uses the same mode
     _activeOnly = activeOnly;
-    
+
     if (!silent) {
       _isLoading = true;
       _errorMessage = null;
@@ -380,34 +606,39 @@ class IncidentProvider extends ChangeNotifier {
     final endpoint = ApiConstants.incidentsEndpoint;
     final fullUrl = '${ApiConstants.baseUrl}$endpoint';
 
-    debugPrint('');
-    debugPrint('═══════════════════════════════════════════════════');
-    debugPrint('🔄 INCIDENT FETCH — START');
-    debugPrint('═══════════════════════════════════════════════════');
-    debugPrint('  📡 Endpoint : GET $fullUrl');
-    debugPrint('  📎 Params   : $params');
-    debugPrint('  🕐 Time     : ${DateTime.now().toIso8601String()}');
-    debugPrint('  🔑 Token    : ${_tokenPreview()}');
-    debugPrint('───────────────────────────────────────────────────');
+    if (kDebugMode) {
+      debugPrint('');
+      debugPrint('═══════════════════════════════════════════════════');
+      debugPrint('🔄 INCIDENT FETCH — START');
+      debugPrint('═══════════════════════════════════════════════════');
+      debugPrint('  📡 Endpoint : GET $fullUrl');
+      debugPrint('  📎 Params   : $params');
+      debugPrint('  🕐 Time     : ${DateTime.now().toIso8601String()}');
+      debugPrint('  🔑 Token    : ${_tokenPreview()}');
+      debugPrint('───────────────────────────────────────────────────');
+    }
 
     try {
-      final stopwatch = Stopwatch()..start();
+      final stopwatch = kDebugMode ? (Stopwatch()..start()) : null;
 
       final response = await _api.get(endpoint, queryParameters: params);
 
-      stopwatch.stop();
-      debugPrint('  ✅ Response in ${stopwatch.elapsedMilliseconds}ms');
-      debugPrint('  📊 Status code : ${response.statusCode}');
-      debugPrint('  📦 Data type   : ${response.data.runtimeType}');
+      if (kDebugMode && stopwatch != null) {
+        stopwatch.stop();
+        debugPrint('  ✅ Response in ${stopwatch.elapsedMilliseconds}ms');
+        debugPrint('  📊 Status code : ${response.statusCode}');
+        debugPrint('  📦 Data type   : ${response.data.runtimeType}');
 
-      // Log raw response (truncated)
-      final rawStr = const JsonEncoder.withIndent('  ').convert(response.data);
-      final truncated = rawStr.length > 2000
-          ? '${rawStr.substring(0, 2000)}\n  ... [truncated, ${rawStr.length} chars total]'
-          : rawStr;
-      debugPrint('  📋 Raw response:');
-      for (final line in truncated.split('\n')) {
-        debugPrint('     $line');
+        // Log raw response (truncated)
+        final rawStr =
+            const JsonEncoder.withIndent('  ').convert(response.data);
+        final truncated = rawStr.length > 2000
+            ? '${rawStr.substring(0, 2000)}\n  ... [truncated, ${rawStr.length} chars total]'
+            : rawStr;
+        debugPrint('  📋 Raw response:');
+        for (final line in truncated.split('\n')) {
+          debugPrint('     $line');
+        }
       }
 
       _parseIncidentList(response.data, activeOnly: activeOnly);
@@ -415,8 +646,10 @@ class IncidentProvider extends ChangeNotifier {
     } on DioException catch (e) {
       _handleDioError(e);
     } catch (e, stackTrace) {
-      debugPrint('  ❌ Unexpected error: $e');
-      debugPrint('     StackTrace: $stackTrace');
+      if (kDebugMode) {
+        debugPrint('  ❌ Unexpected error: $e');
+        debugPrint('     StackTrace: $stackTrace');
+      }
       _errorMessage = 'Something went wrong: ${e.runtimeType}';
     }
 
@@ -467,16 +700,20 @@ class IncidentProvider extends ChangeNotifier {
       }
 
       // Client-side filtering when activeOnly is true (backend doesn't support status_not)
-      List<Map<String, dynamic>> filteredItems = newItems.cast<Map<String, dynamic>>();
+      List<Map<String, dynamic>> filteredItems =
+          newItems.cast<Map<String, dynamic>>();
       if (activeOnly && filteredItems.isNotEmpty) {
         final beforeCount = filteredItems.length;
         filteredItems = filteredItems.where((incident) {
           final status = incident['status']?.toString().toLowerCase() ?? '';
-          return status != 'resolved' && status != 'closed' && status != 'cancelled';
+          return status != 'resolved' &&
+              status != 'closed' &&
+              status != 'cancelled';
         }).toList();
         final filteredCount = beforeCount - filteredItems.length;
         if (filteredCount > 0) {
-          debugPrint('  🗑️ Client-side filter: removed $filteredCount resolved incidents from page $nextPage');
+          debugPrint(
+              '  🗑️ Client-side filter: removed $filteredCount resolved incidents from page $nextPage');
         }
       }
 
@@ -567,9 +804,21 @@ class IncidentProvider extends ChangeNotifier {
       if (data is Map<String, dynamic>) {
         // The API likely returns {success: true, incident: {...}}
         // Try 'incident' key first (singular), then 'data', then fall back to full response
-        _currentIncident = data['incident'] as Map<String, dynamic>? ??
+        final parsed = data['incident'] as Map<String, dynamic>? ??
             data['data'] as Map<String, dynamic>? ??
             data;
+
+        // Preserve optimistic local status from the definitive queues
+        if (hasPendingEStreetFormFor(incidentId)) {
+          parsed['status'] = 'resolved';
+        } else {
+          final pendingAction = latestPendingActionFor(incidentId);
+          if (pendingAction != null) {
+            parsed['status'] = pendingAction;
+          }
+        }
+
+        _currentIncident = parsed;
 
         // START DEBUG LOGGING
         debugPrint('  🔍 DEBUG: Validating Assigned User Data');
@@ -716,59 +965,31 @@ class IncidentProvider extends ChangeNotifier {
 
   Future<bool> acknowledgeIncident(int id, {String? notes}) async {
     return _performAction(
-        id, 'acknowledge', ApiConstants.incidentAcknowledge(id), notes);
+        id, 'acknowledged', ApiConstants.incidentAcknowledge(id), notes);
   }
 
   Future<bool> respondToIncident(int id, {String? notes}) async {
-    final success = await _performAction(
-        id, 'respond', ApiConstants.incidentRespond(id), notes);
-    if (success) {
-      debugPrint(
-          '📍 Respond succeeded — triggering active GPS tracking for incident #$id');
-      onRespondStarted?.call(id);
-    }
-    return success;
+    return _performAction(
+        id, 'responding', ApiConstants.incidentRespond(id), notes);
   }
 
   Future<bool> markOnScene(int id, {String? notes}) async {
-    final success = await _performAction(
-        id, 'on-scene', ApiConstants.incidentOnScene(id), notes);
-    if (success) {
-      debugPrint(
-          '📍 On-scene succeeded — notifying response provider for incident #$id');
-      onOnSceneReached?.call(id);
-    }
-    return success;
+    return _performAction(
+        id, 'on_scene', ApiConstants.incidentOnScene(id), notes);
   }
 
   Future<bool> resolveIncident(int id, {String? notes}) async {
-    final success = await _performAction(
-        id, 'resolve', ApiConstants.incidentResolve(id), notes);
-    if (success) {
-      debugPrint('📍 Resolve succeeded — reverting to passive GPS tracking');
-      onRespondEnded?.call(id);
-    }
-    return success;
+    return _performAction(
+        id, 'resolved', ApiConstants.incidentResolve(id), notes);
   }
 
   Future<bool> closeIncident(int id, {String? notes}) async {
-    final success = await _performAction(
-        id, 'close', ApiConstants.incidentClose(id), notes);
-    if (success) {
-      debugPrint('📍 Close succeeded — reverting to passive GPS tracking');
-      onRespondEnded?.call(id);
-    }
-    return success;
+    return _performAction(id, 'closed', ApiConstants.incidentClose(id), notes);
   }
 
   Future<bool> cancelIncident(int id, {String? notes}) async {
-    final success = await _performAction(
-        id, 'cancel', ApiConstants.incidentCancel(id), notes);
-    if (success) {
-      debugPrint('📍 Cancel succeeded — reverting to passive GPS tracking');
-      onRespondEnded?.call(id);
-    }
-    return success;
+    return _performAction(
+        id, 'cancelled', ApiConstants.incidentCancel(id), notes);
   }
 
   Future<bool> _performAction(
@@ -776,30 +997,59 @@ class IncidentProvider extends ChangeNotifier {
     final fullUrl = '${ApiConstants.baseUrl}$endpoint';
     debugPrint('🔄 Incident #$id action: $action');
     debugPrint('  📡 Full URL: POST $fullUrl');
-    debugPrint('  📎 Data: ${notes != null && notes.isNotEmpty ? {
-        'notes': notes
-      } : 'null'}');
+
+    // ── Optimistic UI update ────────────────────────────────────
+    // Immediately reflect the new status in the local state so the button
+    // responds instantly regardless of network.
+    _applyOptimisticStatus(id, action);
+
+    _isSubmitting = true;
+    notifyListeners();
 
     try {
-      final response = await _api.post(
-        endpoint,
-        data: notes != null && notes.isNotEmpty ? {'notes': notes} : null,
-      );
+      final data = notes != null && notes.isNotEmpty ? {'notes': notes} : null;
+      final response = await _api.post(endpoint, data: data);
       debugPrint('  ✅ Action completed: ${response.statusCode}');
-      debugPrint('  📋 Response Data: ${response.data}');
 
-      // Refresh incident detail and list
+      // Refresh incident detail and list with real server data
       await Future.wait([
         fetchIncident(id),
         fetchIncidents(silent: true),
       ]);
 
+      // Trigger GPS / response provider callbacks
+      _handleActionCallbacks(id, action);
+
+      _isSubmitting = false;
+      notifyListeners();
       return true;
     } on DioException catch (e) {
+      // ── Offline / network error → enqueue ─────────────────────
+      if (isOfflineException(e)) {
+        debugPrint(
+            '📵 Offline — queuing ${action} for incident #$id to sync later');
+        await _actionQueue.enqueue(PendingAction(
+          incidentId: id,
+          action: action,
+          recordedAt: DateTime.now().toIso8601String(),
+          notes: notes,
+        ));
+
+        // Still trigger callbacks so GPS / response state changes happen locally
+        _handleActionCallbacks(id, action);
+
+        _isSubmitting = false;
+        _errorMessage = null; // Clear error — action is queued, not failed
+        notifyListeners();
+        return true; // Return true so the UI shows success (optimistic)
+      }
+
+      // Non-network error (validation, 4xx, etc.) → revert optimistic update
       debugPrint('  ❌ Action failed: ${e.response?.statusCode}');
       debugPrint('  📋 Error response: ${e.response?.data}');
-      debugPrint('  🔍 Error type: ${e.type}');
-      debugPrint('  💬 Error message: ${e.message}');
+
+      // Revert status by refreshing from server
+      fetchIncident(id, silent: true);
 
       if (e.response?.data is Map<String, dynamic>) {
         _errorMessage = e.response!.data['message']?.toString() ??
@@ -807,8 +1057,39 @@ class IncidentProvider extends ChangeNotifier {
       } else {
         _errorMessage = 'Failed to $action incident.';
       }
+      _isSubmitting = false;
       notifyListeners();
       return false;
+    } catch (e) {
+      debugPrint('  ❌ Unexpected error: $e');
+      fetchIncident(id, silent: true); // Revert optimistic update
+      _errorMessage = 'Something went wrong.';
+      _isSubmitting = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Triggers GPS tracking callbacks based on action outcome.
+  void _handleActionCallbacks(int id, String action) {
+    switch (action) {
+      case 'responding':
+        debugPrint(
+            '📍 Respond succeeded — triggering active GPS tracking for incident #$id');
+        onRespondStarted?.call(id);
+        break;
+      case 'on_scene':
+      case 'on-scene':
+        debugPrint(
+            '📍 On-scene succeeded — notifying response provider for incident #$id');
+        onOnSceneReached?.call(id);
+        break;
+      case 'resolved':
+      case 'closed':
+      case 'cancelled':
+        debugPrint('📍 $action succeeded — reverting to passive GPS tracking');
+        onRespondEnded?.call(id);
+        break;
     }
   }
 
@@ -939,21 +1220,37 @@ class IncidentProvider extends ChangeNotifier {
     }
 
     _incidents = list.cast<Map<String, dynamic>>();
-    
+
+    // Preserve optimistic local statuses from the definitive queues
+    for (int i = 0; i < _incidents.length; i++) {
+      final id = _incidents[i]['id'] as int;
+      if (hasPendingEStreetFormFor(id)) {
+        _incidents[i]['status'] = 'resolved';
+      } else {
+        final pendingAction = latestPendingActionFor(id);
+        if (pendingAction != null) {
+          _incidents[i]['status'] = pendingAction;
+        }
+      }
+    }
+
     // Client-side filtering when activeOnly is true (backend doesn't support status_not)
     if (activeOnly) {
       final beforeCount = _incidents.length;
       _incidents = _incidents.where((incident) {
         final status = incident['status']?.toString().toLowerCase() ?? '';
-        return status != 'resolved' && status != 'closed' && status != 'cancelled';
+        return status != 'resolved' &&
+            status != 'closed' &&
+            status != 'cancelled';
       }).toList();
       final filteredCount = beforeCount - _incidents.length;
       if (filteredCount > 0) {
-        debugPrint('  🗑️ Client-side filter: removed $filteredCount resolved/closed/cancelled incidents');
+        debugPrint(
+            '  🗑️ Client-side filter: removed $filteredCount resolved/closed/cancelled incidents');
         debugPrint('  ✅ Remaining: ${_incidents.length} active incidents');
       }
     }
-    
+
     // ── Client-side unit filter (safety net) ─────────────────
     // Only show incidents that have been explicitly dispatched to the
     // current user's unit. Undispatched incidents (null/empty
@@ -971,7 +1268,8 @@ class IncidentProvider extends ChangeNotifier {
       final removedByUnit = beforeUnitFilter - _incidents.length;
       if (removedByUnit > 0) {
         unitFilterWasApplied = true;
-        debugPrint('  🏷️ Unit filter: removed $removedByUnit incidents not dispatched to "$_userUnit"');
+        debugPrint(
+            '  🏷️ Unit filter: removed $removedByUnit incidents not dispatched to "$_userUnit"');
         debugPrint('  ✅ Remaining after unit filter: ${_incidents.length}');
       }
     }
@@ -991,8 +1289,9 @@ class IncidentProvider extends ChangeNotifier {
       if (_lastPage < 1) _lastPage = 1;
       // Ensure current page doesn't exceed last page
       if (_currentPage > _lastPage) _currentPage = _lastPage;
-      
-      debugPrint('  📊 Recalculated pagination: $_total total incidents, $_lastPage pages');
+
+      debugPrint(
+          '  📊 Recalculated pagination: $_total total incidents, $_lastPage pages');
     } else if (_total == 0) {
       _total = _incidents.length;
     }
@@ -1000,17 +1299,19 @@ class IncidentProvider extends ChangeNotifier {
     // Check for new incidents and trigger alarm if found
     alarmService.checkForNewIncidents(_incidents);
 
-    debugPrint('───────────────────────────────────────────────────');
-    debugPrint('  📋 INCIDENT SUMMARY (${_incidents.length} total):');
-    for (var i = 0; i < _incidents.length && i < 10; i++) {
-      final inc = _incidents[i];
-      debugPrint('     [$i] id=${inc['id']} '
-          'type="${inc['incident_type'] ?? inc['type'] ?? 'N/A'}" '
-          'status="${inc['status'] ?? 'N/A'}" '
-          'severity="${inc['severity'] ?? 'N/A'}"');
-    }
-    if (_incidents.length > 10) {
-      debugPrint('     ... and ${_incidents.length - 10} more');
+    if (kDebugMode) {
+      debugPrint('───────────────────────────────────────────────────');
+      debugPrint('  📋 INCIDENT SUMMARY (${_incidents.length} total):');
+      for (var i = 0; i < _incidents.length && i < 10; i++) {
+        final inc = _incidents[i];
+        debugPrint('     [$i] id=${inc['id']} '
+            'type="${inc['incident_type'] ?? inc['type'] ?? 'N/A'}" '
+            'status="${inc['status'] ?? 'N/A'}" '
+            'severity="${inc['severity'] ?? 'N/A'}"');
+      }
+      if (_incidents.length > 10) {
+        debugPrint('     ... and ${_incidents.length - 10} more');
+      }
     }
   }
 

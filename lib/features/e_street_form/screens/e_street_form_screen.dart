@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
 
 import '../../../core/providers/incident_provider.dart';
 
@@ -9,6 +10,7 @@ import '../../../core/constants/app_colors.dart';
 import '../models/e_street_form_model.dart';
 import '../services/e_street_api_service.dart';
 import '../services/e_street_local_storage.dart';
+import '../../../core/services/offline_action_queue.dart';
 import '../widgets/body_diagram_widget.dart';
 import '../widgets/body_observations_list.dart';
 import '../widgets/gcs_selector.dart';
@@ -194,6 +196,87 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
       } catch (_) {}
     }
 
+    // Auto-populate Time Called = created_at
+    if (createdAt != null && _form.timeCalled == null) {
+      try {
+        final dt = DateTime.parse(createdAt).toLocal();
+        _form.timeCalled = '${_pad(dt.hour)}:${_pad(dt.minute)}';
+      } catch (_) {}
+    }
+
+    // Auto-populate Departed Scene and Arrived Scene
+    String? departedStr = data['response_started_at']?.toString();
+    String? arrivedStr = data['arrived_on_scene_at']?.toString() ??
+        data['on_scene_at']?.toString();
+
+    // Check status_history (most reliable source of timeline events)
+    if (data['status_history'] != null) {
+      List? statusHistory;
+      if (data['status_history'] is String) {
+        try {
+          statusHistory = jsonDecode(data['status_history'] as String) as List?;
+        } catch (_) {}
+      } else if (data['status_history'] is List) {
+        statusHistory = data['status_history'] as List;
+      }
+
+      if (statusHistory != null) {
+        for (final entry in statusHistory) {
+          if (entry is Map) {
+            final s = entry['status']?.toString().toLowerCase();
+            final t = entry['timestamp']?.toString() ??
+                entry['created_at']?.toString();
+            if (s == 'responding') departedStr ??= t;
+            if (s == 'on_scene' || s == 'on-scene') arrivedStr ??= t;
+          }
+        }
+      }
+    }
+
+    // Fallback to checking assignments array (same logic as IncidentProvider stats)
+    if ((departedStr == null || arrivedStr == null) &&
+        data['assignments'] is List &&
+        (data['assignments'] as List).isNotEmpty) {
+      final firstAssignment = (data['assignments'] as List).first;
+      if (firstAssignment is Map) {
+        departedStr ??= firstAssignment['response_started_at']?.toString();
+        arrivedStr ??= firstAssignment['arrived_on_scene_at']?.toString() ??
+            firstAssignment['on_scene_at']?.toString();
+      }
+    }
+
+    // FINAL FALLBACK: Check Offline Action Queue for pending un-synced events
+    try {
+      final offlineQueue = OfflineActionQueue();
+      // Ensure initialized before accessing
+      if (offlineQueue.hasPendingFor(widget.incidentId)) {
+        final actions = offlineQueue
+            .getAll()
+            .where((a) => a.incidentId == widget.incidentId)
+            .toList();
+        for (final auth in actions) {
+          final s = auth.action.toLowerCase();
+          if (s == 'responding') departedStr ??= auth.recordedAt;
+          if (s == 'on_scene' || s == 'on-scene')
+            arrivedStr ??= auth.recordedAt;
+        }
+      }
+    } catch (_) {}
+
+    if (departedStr != null && _form.timeDepartedScene == null) {
+      try {
+        final dt = DateTime.parse(departedStr).toLocal();
+        _form.timeDepartedScene = '${_pad(dt.hour)}:${_pad(dt.minute)}';
+      } catch (_) {}
+    }
+
+    if (arrivedStr != null && _form.timeArrivedScene == null) {
+      try {
+        final dt = DateTime.parse(arrivedStr).toLocal();
+        _form.timeArrivedScene = '${_pad(dt.hour)}:${_pad(dt.minute)}';
+      } catch (_) {}
+    }
+
     // Try to load existing e_street_form JSON from the incident
     final eStreetJson = data['e_street_form'];
     if (eStreetJson != null &&
@@ -250,7 +333,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     _finalCommentsCtrl.text = _form.finalComments ?? '';
   }
 
-  void _collectFormData() {
+  Future<void> _collectFormData() async {
     _form.name = _nameCtrl.text.trim();
     _form.age = _emptyNull(_ageCtrl.text);
     _form.address = _emptyNull(_addressCtrl.text);
@@ -280,6 +363,14 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
     _form.hospitalOther = _emptyNull(_hospitalOtherCtrl.text);
 
     _form.finalComments = _emptyNull(_finalCommentsCtrl.text);
+
+    // Capture body diagram exactly when it's on screen (in Step 1)
+    if (_currentStep == 1) {
+      final diag = await _bodyDiagramKey.currentState?.exportAsBase64();
+      if (diag != null) {
+        _form.bodyDiagramScreenshot = diag;
+      }
+    }
   }
 
   String? _emptyNull(String text) {
@@ -319,18 +410,18 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
   // ── Navigation ──────────────────────────────────────────
 
-  void _next() {
+  Future<void> _next() async {
     if (!_validateCurrentStep()) return;
-    _collectFormData();
+    await _collectFormData();
     if (_currentStep < 4) {
-      setState(() => _currentStep++);
+      if (mounted) setState(() => _currentStep++);
     }
   }
 
-  void _previous() {
-    _collectFormData();
+  Future<void> _previous() async {
+    await _collectFormData();
     if (_currentStep > 0) {
-      setState(() => _currentStep--);
+      if (mounted) setState(() => _currentStep--);
     }
   }
 
@@ -338,7 +429,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
 
   Future<void> _submitForm() async {
     if (!_validateCurrentStep()) return;
-    _collectFormData();
+    await _collectFormData();
 
     setState(() => _isSubmitting = true);
 
@@ -425,6 +516,40 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           ],
         ),
       );
+    } on DioException catch (e) {
+      if (!mounted) return;
+
+      final isOffline = context.read<IncidentProvider>().isOfflineException(e);
+
+      if (isOffline) {
+        // Enqueue offline form
+        await context
+            .read<IncidentProvider>()
+            .enqueueEStreetForm(widget.incidentId, _form);
+
+        // Show offline success dialog
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.wifi_off, color: Colors.orange, size: 48),
+            title: const Text('Saved Offline'),
+            content: const Text(
+                'You are offline. The E-Street Form has been saved locally and will auto-submit when connected.\n\nIncident marked as RESOLVED.'),
+            actions: [
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx); // Close dialog
+                  Navigator.pop(context); // Close screen
+                },
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        final errorDetails = e.response?.data?.toString() ?? e.message;
+        _showError('Submission failed (500 Server Crash):\n\n$errorDetails');
+      }
     } catch (e) {
       if (!mounted) return;
       _showError(
@@ -545,10 +670,10 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
           final isDone = i < _currentStep;
           return Expanded(
             child: GestureDetector(
-              onTap: () {
+              onTap: () async {
                 if (i < _currentStep) {
-                  _collectFormData();
-                  setState(() => _currentStep = i);
+                  await _collectFormData();
+                  if (mounted) setState(() => _currentStep = i);
                 }
               },
               child: Column(

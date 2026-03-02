@@ -6,6 +6,7 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/widgets/sync_status_banner.dart';
 
 class IncidentsListScreen extends StatefulWidget {
   const IncidentsListScreen({super.key});
@@ -81,6 +82,8 @@ class _IncidentsListScreenState extends State<IncidentsListScreen> {
       ),
       body: Column(
         children: [
+          const SyncStatusBanner(),
+
           // ── Content Header ──────────────────────────────
           Container(
             width: double.infinity,
