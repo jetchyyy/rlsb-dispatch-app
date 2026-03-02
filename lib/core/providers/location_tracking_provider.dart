@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/api_constants.dart';
 import '../network/api_client.dart';
@@ -37,13 +38,26 @@ class LocationTrackingProvider extends ChangeNotifier {
   final LocationService _locationService;
   final Box<String> _offlineBox;
 
+  /// Completer that signals when state restoration is complete.
+  final Completer<void> _initialized = Completer<void>();
+
+  /// Future that completes when the provider has finished restoring state.
+  /// Await this before starting passive tracking to avoid race conditions.
+  Future<void> get initialized => _initialized.future;
+
+  // ── Persistence Keys ───────────────────────────────────────
+  static const String _keyTrackingMode = 'loc_tracking_mode';
+  static const String _keyActiveIncidentId = 'loc_active_incident_id';
+
   LocationTrackingProvider({
     required ApiClient apiClient,
     required LocationService locationService,
     required Box<String> offlineBox,
   })  : _api = apiClient,
         _locationService = locationService,
-        _offlineBox = offlineBox;
+        _offlineBox = offlineBox {
+    _restoreState();
+  }
 
   // ── Callbacks ──────────────────────────────────────────────
 
@@ -95,7 +109,20 @@ class LocationTrackingProvider extends ChangeNotifier {
       _locationService.getPositionStream(distanceFilter: 2);
 
   /// Begin passive tracking (every 5 minutes). Call after login.
+  /// 
+  /// **Important:** This will clear `_activeIncidentId`. If you need to
+  /// preserve an active incident context, call [startActiveTracking] instead.
   Future<void> startPassiveTracking() async {
+    // Guard: Don't switch to passive if we're actively tracking an incident
+    // This prevents race conditions on app restart where passive tracking
+    // could wipe the restored incident context.
+    if (_activeIncidentId != null) {
+      debugPrint(
+          '📍 ⚠️ startPassiveTracking() blocked — active incident #$_activeIncidentId in progress');
+      debugPrint('   Call startActiveTracking() or stopActiveTracking() instead');
+      return;
+    }
+
     if (_mode == TrackingMode.passive) return;
 
     final hasPermission = await _locationService.ensurePermission();
@@ -115,6 +142,9 @@ class LocationTrackingProvider extends ChangeNotifier {
 
     _startCaptureTimer(ApiConstants.passiveTrackingInterval);
     _startFlushTimer();
+
+    // Persist state
+    _saveState();
 
     // Capture an initial fix immediately
     _capturePosition();
@@ -142,6 +172,9 @@ class LocationTrackingProvider extends ChangeNotifier {
     _startCaptureTimer(ApiConstants.activeTrackingInterval);
     _startFlushTimer();
 
+    // Persist state so it survives app restart
+    _saveState();
+
     // Capture an immediate fix
     _capturePosition();
 
@@ -159,7 +192,8 @@ class LocationTrackingProvider extends ChangeNotifier {
     _activeIncidentId = null;
 
     // Clear offline queue entries that contain the old incident ID
-    // to prevent resolved incident pings from being sent later
+    // to prevent resolved incident pings from being sent later.
+    // This ensures clean separation between incidents.
     if (oldIncidentId != null && _offlineBox.isNotEmpty) {
       final toDelete = <int>[];
       for (int i = 0; i < _offlineBox.length; i++) {
@@ -183,6 +217,9 @@ class LocationTrackingProvider extends ChangeNotifier {
             '📍 Cleared ${toDelete.length} offline pings for incident #$oldIncidentId');
       }
     }
+
+    // Persist cleared state
+    _saveState();
 
     // If we were already in passive mode, just log and return
     if (!wasActive) {
@@ -212,6 +249,9 @@ class LocationTrackingProvider extends ChangeNotifier {
     _mode = TrackingMode.off;
     _isTracking = false;
     _activeIncidentId = null;
+
+    // Clear persisted state on logout
+    _clearState();
 
     // Persist any unsent fixes to Hive before stopping
     _persistBufferToHive();
@@ -349,6 +389,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         }
 
         // Skip entries with stale incident IDs (from completed incidents)
+        // This prevents mixed/corrupted location trails from being uploaded
         final entryIncidentId = entry['incident_id'] as int?;
         if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
           debugPrint(
@@ -365,9 +406,6 @@ class LocationTrackingProvider extends ChangeNotifier {
         toDelete.add(i);
       } on DioException catch (e) {
         // Stop flushing on network error to avoid unnecessary requests
-        // But if it's a 4xx error (validation), we should probably delete it?
-        // For 422 (unprocessable), we should delete to avoid loop.
-        // For now, only stop on connection errors (0 or 5xx or Unknown).
         debugPrint(
             '📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
 
@@ -395,6 +433,67 @@ class LocationTrackingProvider extends ChangeNotifier {
 
   /// No-op: buffer is not used anymore, only offline queue remains.
   void _persistBufferToHive() {}
+
+  // ── State Persistence ──────────────────────────────────────
+
+  /// Restore tracking state from SharedPreferences.
+  /// This ensures active tracking survives app restarts.
+  Future<void> _restoreState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedMode = prefs.getString(_keyTrackingMode);
+      final savedIncidentId = prefs.getInt(_keyActiveIncidentId);
+
+      if (savedMode == 'active' && savedIncidentId != null) {
+        _activeIncidentId = savedIncidentId;
+        _mode = TrackingMode.active;
+        debugPrint(
+            '📍 State restored: active tracking for incident #$savedIncidentId');
+      } else if (savedMode == 'passive') {
+        _mode = TrackingMode.passive;
+        debugPrint('📍 State restored: passive tracking');
+      } else {
+        debugPrint('📍 No saved tracking state found');
+      }
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to restore tracking state: $e');
+    } finally {
+      _initialized.complete();
+    }
+  }
+
+  /// Persist current tracking state to SharedPreferences.
+  Future<void> _saveState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_mode == TrackingMode.active && _activeIncidentId != null) {
+        await prefs.setString(_keyTrackingMode, 'active');
+        await prefs.setInt(_keyActiveIncidentId, _activeIncidentId!);
+        debugPrint(
+            '💾 Location state saved: active, incident #$_activeIncidentId');
+      } else if (_mode == TrackingMode.passive) {
+        await prefs.setString(_keyTrackingMode, 'passive');
+        await prefs.remove(_keyActiveIncidentId);
+        debugPrint('💾 Location state saved: passive');
+      } else {
+        await _clearState();
+      }
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to save tracking state: $e');
+    }
+  }
+
+  /// Clear persisted tracking state.
+  Future<void> _clearState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyTrackingMode);
+      await prefs.remove(_keyActiveIncidentId);
+      debugPrint('💾 Location state cleared');
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to clear tracking state: $e');
+    }
+  }
 
   // ── Dispose ────────────────────────────────────────────────
 

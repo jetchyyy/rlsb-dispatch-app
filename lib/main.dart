@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -84,9 +85,29 @@ void main() async {
   // Initialize background service for keeping GPS alive when backgrounded
   await BackgroundServiceInitializer.initialize();
 
-  // If user is already authenticated, start passive tracking + background service
+  // If user is already authenticated, start location tracking + background service
   if (authProvider.isAuthenticated) {
-    await locationTrackingProvider.startPassiveTracking();
+    // Wait for location provider to restore any saved state (active incident)
+    await locationTrackingProvider.initialized;
+
+    // Check if we have a restored active incident from a previous session
+    if (locationTrackingProvider.activeIncidentId != null) {
+      // Resume active tracking for the restored incident
+      final restoredIncidentId = locationTrackingProvider.activeIncidentId!;
+      debugPrint(
+          '🔄 main: Resuming active tracking for restored incident #$restoredIncidentId');
+      await locationTrackingProvider.startActiveTracking(restoredIncidentId);
+      BackgroundServiceInitializer.setTrackingMode('active',
+          incidentId: restoredIncidentId);
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'Active tracking — responding to incident #$restoredIncidentId',
+      );
+    } else {
+      // No active incident, start passive tracking
+      await locationTrackingProvider.startPassiveTracking();
+    }
+
     await BackgroundServiceInitializer.startService();
   }
 
