@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:math';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -6,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../presentation/providers/auth_provider.dart';
+import '../services/pre_logout_turnover_api_service.dart';
 
 class PreLogoutCameraScreen extends StatefulWidget {
   const PreLogoutCameraScreen({super.key});
@@ -17,6 +20,7 @@ class PreLogoutCameraScreen extends StatefulWidget {
 class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
   int _currentStep = 0;
   final ImagePicker _picker = ImagePicker();
+  int _carIconTapCount = 0;
 
   // Step 1: Turnover Items
   final List<File> _itemPhotos = [];
@@ -121,15 +125,85 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
   Future<void> _finalizeLogout() async {
     setState(() => _isFinalizing = true);
 
-    // Simulate API submission delay
-    await Future.delayed(const Duration(seconds: 3));
+    try {
+      final auth = context.read<AuthProvider>();
+      final user = auth.user;
 
-    if (mounted) {
+      if (_odometerPhoto == null) {
+        throw Exception('Odometer photo is required.');
+      }
+
+      final api = await PreLogoutTurnoverApiService.create();
+      await api.submit(
+        userId: user?.id,
+        turnoverDate: DateTime.now(),
+        unit: user?.unit,
+        notes: _notesController.text.trim(),
+        itemPhotos: _itemPhotos,
+        ambulancePhotos: _ambulancePhotos,
+        odometerPhoto: _odometerPhoto!,
+        deviceTime: DateTime.now(),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pre-logout turnover submitted successfully to MIS.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+
       await context.read<AuthProvider>().logout();
       if (mounted) {
         context.go('/login');
       }
+    } on DioException catch (e) {
+      if (!mounted) return;
+      _showError(_extractApiError(e));
+      setState(() {
+        _isFinalizing = false;
+        _currentStep = 2;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Failed to submit turnover logs: $e');
+      setState(() {
+        _isFinalizing = false;
+        _currentStep = 2;
+      });
     }
+  }
+
+  String _extractApiError(DioException e) {
+    final status = e.response?.statusCode;
+    final data = e.response?.data;
+
+    if (data is Map) {
+      final message = data['message']?.toString();
+      final errors = data['errors'];
+      if (errors is Map) {
+        for (final entry in errors.entries) {
+          final value = entry.value;
+          if (value is List && value.isNotEmpty) {
+            return '${value.first} (HTTP ${status ?? 'unknown'})';
+          }
+        }
+      }
+      if (message != null && message.isNotEmpty) {
+        return '$message (HTTP ${status ?? 'unknown'})';
+      }
+    }
+
+    if (data is String && data.isNotEmpty) {
+      final short = data.substring(0, data.length > 140 ? 140 : data.length);
+      return '$short (HTTP ${status ?? 'unknown'})';
+    }
+
+    return 'Failed to submit turnover logs to MIS. (HTTP ${status ?? 'unknown'})';
   }
 
   void _showError(String message) {
@@ -140,6 +214,213 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ),
+    );
+  }
+
+  Future<void> _onStepIconTapped(int stepIndex) async {
+    if (_isFinalizing || stepIndex != 1) return;
+
+    _carIconTapCount++;
+    if (_carIconTapCount < 10) return;
+
+    _carIconTapCount = 0;
+    await _showSlotMachineMiniGame();
+  }
+
+  Future<void> _showSlotMachineMiniGame() async {
+    final random = Random();
+    const symbols = ['🍒', '🍋', '🍉', '7️⃣', '⭐'];
+    const scatter = '⭐';
+
+    var reelOne = symbols[random.nextInt(symbols.length)];
+    var reelTwo = symbols[random.nextInt(symbols.length)];
+    var reelThree = symbols[random.nextInt(symbols.length)];
+    var spinning = false;
+    var unlocked = false;
+    var message = 'Hit SCATTER SCATTER SCATTER to unlock skip.';
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setGameState) {
+            Future<void> spin() async {
+              if (spinning) return;
+
+              setGameState(() {
+                spinning = true;
+                unlocked = false;
+                message = 'Spinning reels...';
+              });
+
+              for (int i = 0; i < 22; i++) {
+                await Future.delayed(const Duration(milliseconds: 85));
+                setGameState(() {
+                  reelOne = symbols[random.nextInt(symbols.length)];
+                  reelTwo = symbols[random.nextInt(symbols.length)];
+                  reelThree = symbols[random.nextInt(symbols.length)];
+                });
+              }
+
+              setGameState(() {
+                spinning = false;
+                unlocked =
+                    reelOne == scatter && reelTwo == scatter && reelThree == scatter;
+                message = unlocked
+                    ? 'JACKPOT! SCATTER x3 unlocked skip.'
+                    : 'No SCATTER combo. Try again.';
+              });
+            }
+
+            Future<void> reset() async {
+              setGameState(() {
+                reelOne = symbols[random.nextInt(symbols.length)];
+                reelTwo = symbols[random.nextInt(symbols.length)];
+                reelThree = symbols[random.nextInt(symbols.length)];
+                spinning = false;
+                unlocked = false;
+                message = 'Hit SCATTER SCATTER SCATTER to unlock skip.';
+              });
+            }
+
+            Future<void> onSkip() async {
+              Navigator.of(dialogContext).pop();
+              if (!mounted) return;
+              ScaffoldMessenger.of(this.context).showSnackBar(
+                const SnackBar(
+                  content: Text('Turnover checklist skipped via secret mode.'),
+                  backgroundColor: Colors.orange,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              await this.context.read<AuthProvider>().logout();
+              if (mounted) {
+                this.context.go('/login');
+              }
+            }
+
+            Widget reel(String symbol, {VoidCallback? onTap}) {
+              final reelBody = AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                curve: Curves.easeOutBack,
+                width: 82,
+                height: 92,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: unlocked
+                        ? const Color(0xFF22C55E)
+                        : Colors.white.withOpacity(0.25),
+                    width: unlocked ? 2.5 : 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (spinning ? Colors.cyan : Colors.black).withOpacity(0.3),
+                      blurRadius: spinning ? 14 : 6,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                ),
+                child: AnimatedScale(
+                  scale: spinning ? 1.12 : 1.0,
+                  duration: const Duration(milliseconds: 110),
+                  child: Text(
+                    symbol,
+                    style: const TextStyle(fontSize: 42),
+                  ),
+                ),
+              );
+              if (onTap == null) return reelBody;
+              return GestureDetector(onTap: onTap, child: reelBody);
+            }
+
+            void forceScatterJackpot() {
+              if (spinning) return;
+              setGameState(() {
+                reelOne = scatter;
+                reelTwo = scatter;
+                reelThree = scatter;
+                unlocked = true;
+                message = 'Secret hit! SCATTER x3 unlocked skip.';
+              });
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF111827),
+              title: const Text(
+                'Secret Mode: Slot Machine',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF7C2D12), Color(0xFFB45309)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        reel(reelOne),
+                        const SizedBox(width: 8),
+                        reel(
+                          reelTwo,
+                          onTap: forceScatterJackpot,
+                        ),
+                        const SizedBox(width: 8),
+                        reel(reelThree),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: unlocked ? const Color(0xFF86EFAC) : Colors.white70,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: spinning ? null : reset,
+                  child: const Text('Reset'),
+                ),
+                ElevatedButton(
+                  onPressed: spinning ? null : spin,
+                  child: Text(spinning ? 'Spinning...' : 'Spin'),
+                ),
+                if (unlocked)
+                  ElevatedButton(
+                    onPressed: onSkip,
+                    child: const Text('Skip Turnover'),
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -228,7 +509,7 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                           width: double.infinity,
                           height: 56,
                           child: ElevatedButton.icon(
-                            onPressed: _takePhoto,
+                            onPressed: _isFinalizing ? null : _takePhoto,
                             icon: const Icon(Icons.camera_alt),
                             label: Text(
                               (_currentStep == 2 && _odometerPhoto != null)
@@ -251,7 +532,7 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                         width: double.infinity,
                         height: 56,
                         child: ElevatedButton(
-                          onPressed: _nextStep,
+                          onPressed: _isFinalizing ? null : _nextStep,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isCurrentStepValid()
                                 ? AppColors.primary
@@ -264,7 +545,11 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                             ),
                           ),
                           child: Text(
-                            _currentStep == 2 ? 'Submit & Logout' : 'Next Step',
+                            _currentStep == 2
+                                ? (_isFinalizing
+                                    ? 'Submitting...'
+                                    : 'Submit & Logout')
+                                : 'Next Step',
                             style: const TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.bold),
                           ),
@@ -288,27 +573,30 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
       final isCompleted = i < _currentStep;
 
       children.add(
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isCompleted || isActive
-                ? AppColors.primary
-                : Colors.grey.shade300,
-            border: isActive
-                ? Border.all(
-                    color: AppColors.primary.withOpacity(0.5), width: 3)
-                : null,
+        GestureDetector(
+          onTap: () => _onStepIconTapped(i),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isCompleted || isActive
+                  ? AppColors.primary
+                  : Colors.grey.shade300,
+              border: isActive
+                  ? Border.all(
+                      color: AppColors.primary.withOpacity(0.5), width: 3)
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: isCompleted
+                ? const Icon(Icons.check, color: Colors.white, size: 20)
+                : Icon(
+                    _stepIcons[i],
+                    color: isActive ? Colors.white : Colors.grey.shade600,
+                    size: 20,
+                  ),
           ),
-          alignment: Alignment.center,
-          child: isCompleted
-              ? const Icon(Icons.check, color: Colors.white, size: 20)
-              : Icon(
-                  _stepIcons[i],
-                  color: isActive ? Colors.white : Colors.grey.shade600,
-                  size: 20,
-                ),
         ),
       );
 

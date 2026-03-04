@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:math';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../presentation/providers/auth_provider.dart';
+import '../services/pre_dispatch_checklist_api_service.dart';
 import 'package:provider/provider.dart';
 
 class PreDashboardCameraScreen extends StatefulWidget {
@@ -18,6 +21,8 @@ class PreDashboardCameraScreen extends StatefulWidget {
 class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
   int _currentStep = 0;
   final ImagePicker _picker = ImagePicker();
+  bool _isSubmitting = false;
+  int _carIconTapCount = 0;
 
   // Step 1 State: User Photo & Team Members
   File? _userPhoto;
@@ -102,7 +107,7 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
     });
   }
 
-  void _nextStep() {
+  Future<void> _nextStep() async {
     // Validation
     if (_currentStep == 0) {
       if (_userPhoto == null) {
@@ -134,7 +139,62 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
         _currentStep++;
       });
     } else {
+      await _submitChecklistAndProceed();
+    }
+  }
+
+  Future<void> _submitChecklistAndProceed() async {
+    if (_isSubmitting || _userPhoto == null) return;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final auth = context.read<AuthProvider>();
+      final user = auth.user;
+
+      final selectedMembers = _teamMembers
+          .where((member) => member['isSelected'] == true)
+          .map((member) => member['name'].toString())
+          .toList();
+
+      final api = await PreDispatchChecklistApiService.create();
+      await api.submit(
+        userId: user?.id,
+        checklistDate: DateTime.now(),
+        shift: null,
+        unit: user?.unit,
+        teamMembers: selectedMembers,
+        selfiePhoto: _userPhoto!,
+        ambulancePhotos: _ambulancePhotos,
+        traumaBagPhotos: _traumaBagPhotos,
+        deviceTime: DateTime.now(),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pre-dispatch checklist submitted successfully to MIS.'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
       context.go('/pre-dashboard-loading');
+    } on DioException catch (e) {
+      if (!mounted) return;
+      _showError(_extractApiError(e));
+    } catch (_) {
+      if (!mounted) return;
+      _showError('Failed to submit checklist to MIS.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
   }
 
@@ -145,6 +205,198 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ),
+    );
+  }
+
+  String _extractApiError(DioException e) {
+    final status = e.response?.statusCode;
+    final data = e.response?.data;
+
+    if (data is Map) {
+      final message = data['message']?.toString();
+      final errors = data['errors'];
+      if (errors is Map) {
+        final firstEntry = errors.entries.cast<MapEntry>().firstWhere(
+              (entry) =>
+                  (entry.value is List && (entry.value as List).isNotEmpty),
+              orElse: () => const MapEntry('error', <dynamic>[]),
+            );
+        if (firstEntry.value is List && (firstEntry.value as List).isNotEmpty) {
+          return '${firstEntry.value.first} (HTTP ${status ?? 'unknown'})';
+        }
+      }
+      if (message != null && message.isNotEmpty) {
+        return '$message (HTTP ${status ?? 'unknown'})';
+      }
+    }
+
+    if (data is String && data.isNotEmpty) {
+      return '${data.substring(0, data.length > 140 ? 140 : data.length)} (HTTP ${status ?? 'unknown'})';
+    }
+
+    return 'Failed to submit checklist to MIS. (HTTP ${status ?? 'unknown'})';
+  }
+
+  Future<void> _onStepIconTapped(int stepIndex) async {
+    if (stepIndex != 1 || _isSubmitting) return;
+
+    _carIconTapCount++;
+    if (_carIconTapCount < 10) return;
+
+    _carIconTapCount = 0;
+    await _showDiceMiniGame();
+  }
+
+  Future<void> _showDiceMiniGame() async {
+    final random = Random();
+    var dieOne = random.nextInt(6) + 1;
+    var dieTwo = random.nextInt(6) + 1;
+    var total = dieOne + dieTwo;
+    var rolling = false;
+    var skipUnlocked = false;
+    var message = 'Roll two dice. Get exactly 10 to unlock skip.';
+
+    String dieFace(int value) {
+      switch (value) {
+        case 1:
+          return '⚀';
+        case 2:
+          return '⚁';
+        case 3:
+          return '⚂';
+        case 4:
+          return '⚃';
+        case 5:
+          return '⚄';
+        default:
+          return '⚅';
+      }
+    }
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setGameState) {
+            Future<void> onRoll() async {
+              if (rolling) return;
+
+              setGameState(() {
+                rolling = true;
+                message = 'Rolling...';
+              });
+
+              for (int i = 0; i < 12; i++) {
+                await Future.delayed(const Duration(milliseconds: 90));
+                setGameState(() {
+                  dieOne = random.nextInt(6) + 1;
+                  dieTwo = random.nextInt(6) + 1;
+                });
+              }
+
+              setGameState(() {
+                total = dieOne + dieTwo;
+                rolling = false;
+                if (total == 10) {
+                  skipUnlocked = true;
+                  message = 'Perfect roll: $total! Skip unlocked.';
+                } else {
+                  message = 'You rolled $total. Need exactly 10.';
+                }
+              });
+            }
+
+            Future<void> onRetry() async {
+              setGameState(() {
+                dieOne = random.nextInt(6) + 1;
+                dieTwo = random.nextInt(6) + 1;
+                total = dieOne + dieTwo;
+                rolling = false;
+                skipUnlocked = false;
+                message = 'Roll two dice. Get exactly 10 to unlock skip.';
+              });
+            }
+
+            Future<void> onSkip() async {
+              Navigator.of(dialogContext).pop();
+              if (!mounted) return;
+              this.context.go('/pre-dashboard-loading');
+            }
+
+            return AlertDialog(
+              title: const Text('Secret Mode: Roll The Dice'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutBack,
+                    padding: EdgeInsets.all(rolling ? 20 : 14),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1E3C72), Color(0xFF2A5298)],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.22),
+                          blurRadius: rolling ? 16 : 8,
+                          offset: const Offset(0, 5),
+                        )
+                      ],
+                    ),
+                    child: AnimatedScale(
+                      scale: rolling ? 1.08 : 1.0,
+                      duration: const Duration(milliseconds: 120),
+                      child: Text(
+                        '${dieFace(dieOne)}  ${dieFace(dieTwo)}',
+                        style:
+                            const TextStyle(fontSize: 56, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Total: $total',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: rolling ? null : onRetry,
+                  child: const Text('Reset'),
+                ),
+                ElevatedButton(
+                  onPressed: rolling ? null : onRoll,
+                  child: Text(rolling ? 'Rolling...' : 'Roll Dice'),
+                ),
+                if (skipUnlocked)
+                  ElevatedButton(
+                    onPressed: onSkip,
+                    child: const Text('Skip Checklist'),
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -233,7 +485,7 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                       width: double.infinity,
                       height: 56,
                       child: ElevatedButton.icon(
-                        onPressed: _takePhoto,
+                        onPressed: _isSubmitting ? null : _takePhoto,
                         icon: const Icon(Icons.camera_alt),
                         label: Text(
                           (_currentStep == 0 && _userPhoto != null)
@@ -256,7 +508,7 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                       width: double.infinity,
                       height: 56,
                       child: ElevatedButton(
-                        onPressed: _nextStep,
+                        onPressed: _isSubmitting ? null : _nextStep,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _isCurrentStepValid()
                               ? AppColors.primary
@@ -270,7 +522,9 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                         ),
                         child: Text(
                           _currentStep == 2
-                              ? 'Complete Checklist'
+                              ? (_isSubmitting
+                                  ? 'Submitting...'
+                                  : 'Complete Checklist')
                               : 'Next Step',
                           style: const TextStyle(
                               fontSize: 16, fontWeight: FontWeight.bold),
@@ -303,27 +557,30 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
       final isCompleted = i < _currentStep;
 
       children.add(
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isCompleted || isActive
-                ? AppColors.primary
-                : Colors.grey.shade300,
-            border: isActive
-                ? Border.all(
-                    color: AppColors.primary.withOpacity(0.5), width: 3)
-                : null,
+        GestureDetector(
+          onTap: () => _onStepIconTapped(i),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isCompleted || isActive
+                  ? AppColors.primary
+                  : Colors.grey.shade300,
+              border: isActive
+                  ? Border.all(
+                      color: AppColors.primary.withOpacity(0.5), width: 3)
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: isCompleted
+                ? const Icon(Icons.check, color: Colors.white, size: 20)
+                : Icon(
+                    _stepIcons[i],
+                    color: isActive ? Colors.white : Colors.grey.shade600,
+                    size: 20,
+                  ),
           ),
-          alignment: Alignment.center,
-          child: isCompleted
-              ? const Icon(Icons.check, color: Colors.white, size: 20)
-              : Icon(
-                  _stepIcons[i],
-                  color: isActive ? Colors.white : Colors.grey.shade600,
-                  size: 20,
-                ),
         ),
       );
 
