@@ -52,6 +52,12 @@ class ApiConstants {
   // E-Street Form Endpoints
   static String eStreetForm(int incidentId) => '/incidents/$incidentId/e-street-form';
 
+  // Pre-Dispatch Checklist Endpoints
+  static const String preDispatchChecklistsEndpoint = '/pre-dispatch-checklists';
+
+  // Pre-Logout Turnover Endpoints
+  static const String preLogoutTurnoversEndpoint = '/pre-logout-turnovers';
+
   // Headers
   static const String contentType = 'Content-Type';
   static const String accept = 'Accept';
