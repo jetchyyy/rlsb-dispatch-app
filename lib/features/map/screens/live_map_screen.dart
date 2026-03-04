@@ -11,10 +11,13 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../../core/providers/location_tracking_provider.dart';
+import '../../../core/services/map_preloader.dart';
 import '../../../core/services/routing_service.dart';
 
 class LiveMapScreen extends StatefulWidget {
-  const LiveMapScreen({super.key});
+  final int? initialIncidentId;
+
+  const LiveMapScreen({super.key, this.initialIncidentId});
 
   @override
   State<LiveMapScreen> createState() => _LiveMapScreenState();
@@ -24,12 +27,16 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   final RoutingService _routingService = RoutingService();
+  final MapPreloader _mapPreloader = MapPreloader();
 
   // Real-time tracking state
   StreamSubscription<Position>? _positionSubscription;
   Position? _currentPosition;
   bool _isNavigating = false;
   double _currentHeading = 0.0;
+  Position? _lastUiPosition;
+  DateTime? _lastUiUpdateAt;
+  DateTime? _lastCameraUpdateAt;
 
   bool _showList = true;
   bool _mapReady = false;
@@ -41,6 +48,11 @@ class _LiveMapScreenState extends State<LiveMapScreen>
   List<LatLng> _routePoints = [];
   Map<String, dynamic>? _routeStats;
   bool _isFetchingRoute = false;
+  bool _useOfflineTiles = false;
+  String _offlineTileUrlTemplate = '';
+  Timer? _tileModeTimer;
+  LatLng? _autoNavigateTarget;
+  bool _autoNavigationStarted = false;
 
   // Animation controller for smooth transitions
   late AnimationController _fadeController;
@@ -71,6 +83,7 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     'reported',
     'acknowledged',
     'dispatched',
+    'responding',
     'en_route',
     'on_scene',
   };
@@ -105,6 +118,8 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<IncidentProvider>().fetchIncidents(silent: true);
       _subscribeToLocationUpdates();
+      _initializeTileMode();
+      _prepareAutoNavigationTarget();
 
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) {
@@ -144,16 +159,63 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     _positionSubscription = locationProvider.locationStream.listen((position) {
       if (!mounted) return;
 
-      setState(() {
-        _currentPosition = position;
-        _currentHeading = position.heading;
-      });
+      _currentPosition = position;
+      _currentHeading = position.heading;
+
+      if (_shouldRefreshLocationUi(position)) {
+        setState(() {});
+      }
 
       // If navigation mode is active, lock camera to user
-      if (_isNavigating && _mapController.camera.zoom >= 3) {
+      if (_isNavigating &&
+          _mapController.camera.zoom >= 3 &&
+          _shouldUpdateCamera(position)) {
         _updateCameraForNavigation(position);
       }
+
+      _maybeStartAutoNavigation();
     });
+  }
+
+  bool _shouldRefreshLocationUi(Position position) {
+    final now = DateTime.now();
+    if (_lastUiPosition == null || _lastUiUpdateAt == null) {
+      _lastUiPosition = position;
+      _lastUiUpdateAt = now;
+      return true;
+    }
+
+    final moved = Geolocator.distanceBetween(
+      _lastUiPosition!.latitude,
+      _lastUiPosition!.longitude,
+      position.latitude,
+      position.longitude,
+    );
+    final elapsed = now.difference(_lastUiUpdateAt!);
+
+    if (elapsed < const Duration(milliseconds: 500) && moved < 3) {
+      return false;
+    }
+
+    _lastUiPosition = position;
+    _lastUiUpdateAt = now;
+    return true;
+  }
+
+  bool _shouldUpdateCamera(Position position) {
+    final now = DateTime.now();
+    if (_lastCameraUpdateAt == null) {
+      _lastCameraUpdateAt = now;
+      return true;
+    }
+
+    final elapsed = now.difference(_lastCameraUpdateAt!);
+    if (elapsed < const Duration(milliseconds: 350)) {
+      return false;
+    }
+
+    _lastCameraUpdateAt = now;
+    return true;
   }
 
   void _updateCameraForNavigation(Position position) {
@@ -198,9 +260,76 @@ class _LiveMapScreenState extends State<LiveMapScreen>
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    _tileModeTimer?.cancel();
     _fadeController.dispose();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _initializeTileMode() async {
+    await _mapPreloader.preloadTiles();
+    final template = await _mapPreloader.localTileUrlTemplate();
+    final hasCache = await _mapPreloader.hasAnyCachedTiles();
+    final online = await _mapPreloader.canReachTileServer();
+    if (!mounted) return;
+
+    setState(() {
+      _offlineTileUrlTemplate = template;
+      _useOfflineTiles = !online && hasCache;
+    });
+
+    _tileModeTimer?.cancel();
+    _tileModeTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      final isOnline = await _mapPreloader.canReachTileServer();
+      final cached = await _mapPreloader.hasAnyCachedTiles();
+      if (!mounted) return;
+      final nextMode = !isOnline && cached;
+      if (nextMode != _useOfflineTiles) {
+        setState(() => _useOfflineTiles = nextMode);
+      }
+    });
+  }
+
+  Future<void> _prepareAutoNavigationTarget() async {
+    final incidentId = widget.initialIncidentId;
+    if (incidentId == null || _autoNavigationStarted) return;
+
+    final ip = context.read<IncidentProvider>();
+    Map<String, dynamic>? incident;
+    for (final item in ip.incidents) {
+      if (item['id'] == incidentId) {
+        incident = item;
+        break;
+      }
+    }
+
+    if (incident == null) {
+      await ip.fetchIncident(incidentId, silent: true);
+      incident = ip.currentIncident;
+    }
+
+    final lat = _parseDouble(incident?['latitude']);
+    final lng = _parseDouble(incident?['longitude']);
+    if (lat == null || lng == null) return;
+
+    _autoNavigateTarget = LatLng(lat, lng);
+    _maybeStartAutoNavigation();
+  }
+
+  Future<void> _maybeStartAutoNavigation() async {
+    if (_autoNavigationStarted) return;
+    if (_autoNavigateTarget == null) return;
+
+    final hasPosition = _currentPosition != null ||
+        context.read<LocationTrackingProvider>().lastPosition != null;
+    if (!hasPosition) return;
+
+    _autoNavigationStarted = true;
+    await _startNavigationTo(
+      _autoNavigateTarget!.latitude,
+      _autoNavigateTarget!.longitude,
+      closeBottomSheet: false,
+    );
   }
 
   List<Marker> _buildMarkers(List<Map<String, dynamic>> incidents) {
@@ -427,7 +556,11 @@ class _LiveMapScreenState extends State<LiveMapScreen>
     return '${(meters / 1000).toStringAsFixed(1)} km';
   }
 
-  Future<void> _startNavigationTo(double lat, double lng) async {
+  Future<void> _startNavigationTo(
+    double lat,
+    double lng, {
+    bool closeBottomSheet = true,
+  }) async {
     final start = _currentPosition != null
         ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
         : context.read<LocationTrackingProvider>().lastPosition != null
@@ -448,13 +581,16 @@ class _LiveMapScreenState extends State<LiveMapScreen>
 
     setState(() => _isFetchingRoute = true);
 
-    // Close bottom sheet if open
-    Navigator.pop(context);
+    // Close incident bottom sheet only when the action originated there.
+    if (closeBottomSheet) {
+      Navigator.pop(context);
+    }
 
     final end = LatLng(lat, lng);
     final routeData = await _routingService.getRoute(start, end);
 
     if (mounted) {
+      final source = routeData?['source']?.toString();
       setState(() {
         _isFetchingRoute = false;
         if (routeData != null && routeData['points'] != null) {
@@ -472,6 +608,17 @@ class _LiveMapScreenState extends State<LiveMapScreen>
           );
         }
       });
+
+      if (source == 'cached') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Using cached route (offline mode).')),
+        );
+      } else if (source == 'fallback') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No network route. Using direct-line fallback.')),
+        );
+      }
     }
   }
 
@@ -737,6 +884,12 @@ class _LiveMapScreenState extends State<LiveMapScreen>
                   icon: const Icon(Icons.refresh),
                   onPressed: () => ip.fetchIncidents(silent: true),
                 ),
+                IconButton(
+                  icon: Icon(_useOfflineTiles ? Icons.cloud_off : Icons.cloud),
+                  tooltip:
+                      _useOfflineTiles ? 'Offline map tiles' : 'Online map tiles',
+                  onPressed: () async => _initializeTileMode(),
+                ),
               ],
             ),
       body: Hero(
@@ -784,10 +937,14 @@ class _LiveMapScreenState extends State<LiveMapScreen>
                                 ),
                                 children: [
                                   TileLayer(
-                                    urlTemplate:
-                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                    urlTemplate: _useOfflineTiles
+                                        ? _offlineTileUrlTemplate
+                                        : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                                     userAgentPackageName:
                                         'ph.inno.sdnpdrrmo.dispatch',
+                                    tileProvider: _useOfflineTiles
+                                        ? FileTileProvider()
+                                        : null,
                                     maxZoom: 19,
                                     // Optimize buffer sizes for better performance
                                     keepBuffer: 4, // Reduced from 8
@@ -1004,7 +1161,30 @@ class _LiveMapScreenState extends State<LiveMapScreen>
                               ),
                             ],
                           ),
-                          const SizedBox(height: 16),
+                                  const SizedBox(height: 16),
+                          Text(
+                            (_routeStats!['source']?.toString() ?? 'online')
+                                        .toLowerCase() ==
+                                    'online'
+                                ? 'Route source: Online'
+                                : (_routeStats!['source']
+                                                ?.toString()
+                                                .toLowerCase() ==
+                                            'cached')
+                                    ? 'Route source: Cached'
+                                    : 'Route source: Fallback',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: (_routeStats!['source']
+                                              ?.toString()
+                                              .toLowerCase() ==
+                                          'fallback')
+                                  ? Colors.orange.shade800
+                                  : Colors.grey.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(

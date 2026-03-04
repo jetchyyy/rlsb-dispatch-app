@@ -47,7 +47,7 @@ class ApiClient {
     ));
   }
 
-  // GET request
+  // GET requesttt
   Future<Response> get(
     String path, {
     Map<String, dynamic>? queryParameters,
