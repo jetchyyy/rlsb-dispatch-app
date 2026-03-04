@@ -467,7 +467,12 @@ class _AppState extends State<App> {
             GoRoute(
               path: '/map',
               name: 'map',
-              builder: (context, state) => const LiveMapScreen(),
+              builder: (context, state) {
+                final incidentId = int.tryParse(
+                  state.queryParameters['incidentId'] ?? '',
+                );
+                return LiveMapScreen(initialIncidentId: incidentId);
+              },
             ),
 
             // ── Profile ────────────────────────────────────────

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:url_launcher/url_launcher.dart';
@@ -139,6 +140,16 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       appBar: AppBar(
         title: Text(incident?['incident_number'] ?? 'Incident Detail'),
         actions: [
+          if (incident != null &&
+              ((incident['status'] ?? '').toString().toLowerCase() ==
+                      'responding' ||
+                  (incident['status'] ?? '').toString().toLowerCase() ==
+                      'on_scene'))
+            IconButton(
+              icon: const Icon(Icons.map),
+              tooltip: 'Open live map',
+              onPressed: () => context.push('/map?incidentId=${widget.incidentId}'),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => ip.fetchIncident(widget.incidentId),
@@ -729,6 +740,11 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           backgroundColor: AppColors.success,
         ),
       );
+
+      // Immediately open map after responder taps "Respond".
+      if (nextStatus == 'responding' && mounted) {
+        context.push('/map?incidentId=$incidentId');
+      }
       
       // Navigate to E-Street Form after marking "On Scene"
       if (nextStatus == 'on_scene' && mounted) {
