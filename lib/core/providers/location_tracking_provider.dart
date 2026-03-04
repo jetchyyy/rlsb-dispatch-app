@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/api_constants.dart';
+import '../models/batch_update_response.dart';
 import '../network/api_client.dart';
 import '../services/location_service.dart';
 
@@ -70,6 +72,7 @@ class LocationTrackingProvider extends ChangeNotifier {
   TrackingMode _mode = TrackingMode.off;
   int? _activeIncidentId;
   Position? _lastPosition;
+  DateTime? _lastCaptureTime;
   bool _isTracking = false;
   String? _errorMessage;
 
@@ -77,6 +80,12 @@ class LocationTrackingProvider extends ChangeNotifier {
   /// Defaults to `'available'` and is synced by the wiring layer
   /// whenever [IncidentResponseProvider] changes state.
   String _responseStatus = 'available';
+
+  /// Last captured response status to detect status transitions.
+  String _lastCapturedStatus = 'available';
+
+  /// Flag to prevent concurrent batch sends
+  bool _isSendingBatch = false;
 
   /// Timer that fires to capture a GPS fix.
   /// Timer for periodic active/passive updates
@@ -96,9 +105,20 @@ class LocationTrackingProvider extends ChangeNotifier {
   int get pendingUpdates => _offlineBox.length;
 
   /// Update the response status included in location payloads.
+  /// Resets the capture filters when status changes (e.g., en_route → on_scene)
+  /// to ensure the next periodic capture will happen regardless of time/distance thresholds.
   set responseStatus(String value) {
+    final statusChanged = _responseStatus != value;
     _responseStatus = value;
     debugPrint('📍 Response status updated to: $value');
+    
+    // Reset capture filters on status change to ensure next capture happens
+    // This avoids forcing an immediate capture that might use stale GPS data
+    if (statusChanged && _isTracking) {
+      debugPrint('📍 🔄 Status changed from $_lastCapturedStatus to $value — resetting filters for next capture');
+      _lastCaptureTime = null; // Next capture will bypass time filter
+      _lastPosition = null;    // Next capture will bypass distance filter
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────
@@ -289,9 +309,37 @@ class LocationTrackingProvider extends ChangeNotifier {
         return;
       }
 
-      // ── Distance Filter ───────────────────────────────────────
-      // Skip update if device hasn't moved enough (prevents jitter/noise)
-      if (_lastPosition != null) {
+      // ── Jump Detection Filter ─────────────────────────────────
+      // Reject positions that are impossibly far from last known position
+      // This prevents sharp deviations from GPS errors or spoofing
+      if (_lastPosition != null && _lastCaptureTime != null) {
+        final timeDelta = DateTime.now().difference(_lastCaptureTime!).inSeconds;
+        final distance = _locationService.distanceBetween(
+          _lastPosition!.latitude,
+          _lastPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        
+        // Reject if moved > 500m in < 10 seconds (unrealistic for ground movement)
+        // This catches GPS glitches and prevents trail jumps
+        if (timeDelta < 10 && distance > 500) {
+          debugPrint(
+              '📍 ❌ Position rejected (jump detection): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is unrealistic');
+          return;
+        }
+        
+        // Skip only if BOTH time < threshold AND distance < threshold (jitter scenario)
+        if (timeDelta < ApiConstants.minTimeDeltaSeconds && 
+            distance < ApiConstants.minDistanceMeters) {
+          debugPrint(
+              '📍 ⏭️  Position skipped (jitter filter): ${timeDelta}s < ${ApiConstants.minTimeDeltaSeconds}s AND ${distance.toStringAsFixed(1)}m < ${ApiConstants.minDistanceMeters}m');
+          return;
+        }
+      }
+      
+      // Distance-only filter for first position after _lastPosition is set
+      if (_lastPosition != null && _lastCaptureTime == null) {
         final distance = _locationService.distanceBetween(
           _lastPosition!.latitude,
           _lastPosition!.longitude,
@@ -301,13 +349,14 @@ class LocationTrackingProvider extends ChangeNotifier {
         if (distance < ApiConstants.minDistanceMeters) {
           debugPrint(
               '📍 ⏭️  Position skipped: moved only ${distance.toStringAsFixed(1)}m < ${ApiConstants.minDistanceMeters}m threshold');
-          // Still update lastPosition timestamp but don't send to server
           _lastPosition = position;
           return;
         }
       }
 
       _lastPosition = position;
+      _lastCaptureTime = DateTime.now();
+      _lastCapturedStatus = _responseStatus;
 
       // Notify listeners (e.g. auto-arrival detection)
       onPositionCaptured?.call(position);
@@ -368,67 +417,200 @@ class LocationTrackingProvider extends ChangeNotifier {
 
   // ── Private — Flush / Upload ───────────────────────────────
 
+  /// Deduplicate offline queue entries by timestamp.
+  /// Normalizes timestamps to second precision to catch millisecond duplicates.
+  List<Map<String, dynamic>> _deduplicateEntries(List<Map<String, dynamic>> entries) {
+    final seen = <String>{};
+    final deduplicated = <Map<String, dynamic>>[];
+    
+    for (final entry in entries) {
+      final timestamp = entry['timestamp'] as String?;
+      if (timestamp == null) {
+        // Skip entries without timestamp (shouldn't happen, but be safe)
+        debugPrint('📍 ⚠️ Skipping entry without timestamp');
+        continue;
+      }
+      
+      // Normalize to second precision (ignore milliseconds)
+      // Timestamps are ISO8601: "2026-03-03T10:30:00.123Z" -> "2026-03-03T10:30:00"
+      final normalizedTimestamp = timestamp.split('.').first;
+      
+      if (seen.contains(normalizedTimestamp)) {
+        debugPrint('📍 🔄 Skipping duplicate cached point: $timestamp');
+        continue;
+      }
+      
+      seen.add(normalizedTimestamp);
+      deduplicated.add(entry);
+    }
+    
+    final removed = entries.length - deduplicated.length;
+    if (removed > 0) {
+      debugPrint('📍 Deduplicated: ${entries.length} → ${deduplicated.length} points ($removed duplicates removed)');
+    }
+    
+    return deduplicated;
+  }
+
+  /// Split a list into chunks of specified size.
+  List<List<T>> _splitIntoChunks<T>(List<T> list, int chunkSize) {
+    final chunks = <List<T>>[];
+    for (var i = 0; i < list.length; i += chunkSize) {
+      chunks.add(list.sublist(i, min(i + chunkSize, list.length)));
+    }
+    return chunks;
+  }
+
   /// Retry sending any failed location updates from the offline queue.
+  /// Uses the batch API endpoint for efficiency and handles deduplication.
   Future<void> flushBatch() async {
     if (_offlineBox.isEmpty) return;
+    
+    // Prevent concurrent batch sends
+    if (_isSendingBatch) {
+      debugPrint('📍 Batch send already in progress, skipping...');
+      return;
+    }
+    
+    _isSendingBatch = true;
     debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
-    final toDelete = <int>[];
-    for (int i = 0; i < _offlineBox.length; i++) {
-      try {
-        final raw = _offlineBox.getAt(i);
-        if (raw == null) {
-          toDelete.add(i); // Remove corrupted/null entries
-          continue;
+    
+    try {
+      // Collect all valid entries
+      final allEntries = <Map<String, dynamic>>[];
+      final indicesToDelete = <int>[];
+      
+      for (int i = 0; i < _offlineBox.length; i++) {
+        try {
+          final raw = _offlineBox.getAt(i);
+          if (raw == null) {
+            indicesToDelete.add(i); // Remove corrupted/null entries
+            continue;
+          }
+          
+          final entry = jsonDecode(raw) as Map<String, dynamic>;
+          
+          // Migrate old 'captured_at' to 'timestamp' for backward compatibility
+          if (entry.containsKey('captured_at') && !entry.containsKey('timestamp')) {
+            entry['timestamp'] = entry.remove('captured_at');
+          }
+          
+          // Skip entries with stale incident IDs (from completed incidents)
+          final entryIncidentId = entry['incident_id'] as int?;
+          if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
+            debugPrint(
+                '📍 Skipping stale ping for incident #$entryIncidentId (current: ${_activeIncidentId ?? "none"})');
+            indicesToDelete.add(i);
+            continue;
+          }
+          
+          allEntries.add(entry);
+        } catch (e) {
+          debugPrint('📍 Error parsing offline entry [index $i]: $e');
+          indicesToDelete.add(i); // Remove malformed entries
         }
-        final entry = jsonDecode(raw) as Map<String, dynamic>;
-
-        // Migrate old 'captured_at' to 'timestamp' for backward compatibility
-        if (entry.containsKey('captured_at') &&
-            !entry.containsKey('timestamp')) {
-          entry['timestamp'] = entry.remove('captured_at');
-        }
-
-        // Skip entries with stale incident IDs (from completed incidents)
-        // This prevents mixed/corrupted location trails from being uploaded
-        final entryIncidentId = entry['incident_id'] as int?;
-        if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
-          debugPrint(
-              '📍 Skipping stale ping for incident #$entryIncidentId (current: ${_activeIncidentId ?? "none"})');
-          toDelete.add(i);
-          continue;
-        }
-
-        await _api.post(
-          '/location/update',
-          data: entry,
-        );
-        debugPrint('📍 Flushed offline location: $entry');
-        toDelete.add(i);
-      } on DioException catch (e) {
-        // Stop flushing on network error to avoid unnecessary requests
-        debugPrint(
-            '📍 Offline upload failed (${e.response?.statusCode}): ${e.message}');
-
-        // If it's a permanent error (e.g. 400, 422), discard it
-        if (e.response != null &&
-            (e.response!.statusCode! >= 400 && e.response!.statusCode! < 500)) {
-          debugPrint('📍 Discarding invalid offline entry [index $i]');
-          toDelete.add(i);
-        } else {
-          // Network/Server error — stop trying for now
+      }
+      
+      // Remove invalid entries first
+      for (final idx in indicesToDelete.reversed) {
+        await _offlineBox.deleteAt(idx);
+      }
+      
+      if (allEntries.isEmpty) {
+        debugPrint('📍 No valid entries to send after filtering');
+        notifyListeners();
+        return;
+      }
+      
+      // Deduplicate entries by timestamp before sending
+      final deduplicated = _deduplicateEntries(allEntries);
+      
+      if (deduplicated.isEmpty) {
+        debugPrint('📍 All entries were duplicates, clearing queue');
+        await _offlineBox.clear();
+        notifyListeners();
+        return;
+      }
+      
+      // Split into chunks to avoid overwhelming the server
+      final chunks = _splitIntoChunks(deduplicated, ApiConstants.batchChunkSize);
+      debugPrint('📍 Sending ${deduplicated.length} locations in ${chunks.length} batch(es)');
+      
+      int totalSent = 0;
+      int totalServerDuplicates = 0;
+      int successfulChunks = 0;
+      
+      for (int chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+        final chunk = chunks[chunkIndex];
+        
+        try {
+          final response = await _api.post(
+            ApiConstants.locationBatchUpdate,
+            data: {'locations': chunk},
+          );
+          
+          // Parse the batch response
+          final batchResponse = BatchUpdateResponse.fromJson(response.data);
+          
+          if (batchResponse.success) {
+            totalSent += batchResponse.data.savedCount;
+            totalServerDuplicates += batchResponse.data.duplicatesSkipped;
+            successfulChunks++;
+            
+            debugPrint('📍 ✅ Batch ${chunkIndex + 1}/${chunks.length}: '
+                '${batchResponse.data.savedCount} saved, '
+                '${batchResponse.data.duplicatesSkipped} duplicates skipped by server');
+          } else {
+            debugPrint('📍 ❌ Batch ${chunkIndex + 1} failed: ${batchResponse.message}');
+            // Don't clear queue on failure, will retry next time
+            break;
+          }
+          
+          // Small delay between chunks to avoid overwhelming server
+          if (chunks.length > 1 && chunkIndex < chunks.length - 1) {
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+          
+        } on DioException catch (e) {
+          debugPrint('📍 Batch upload failed (${e.response?.statusCode}): ${e.message}');
+          
+          // If it's a permanent error (e.g. 400, 422), clear the problematic chunk
+          if (e.response != null &&
+              (e.response!.statusCode! >= 400 && e.response!.statusCode! < 500)) {
+            debugPrint('📍 Discarding invalid batch chunk [${chunkIndex + 1}]');
+            successfulChunks++; // Count as "processed" to clear from queue
+          } else {
+            // Network/Server error — stop trying for now
+            break;
+          }
+        } catch (e) {
+          debugPrint('📍 Batch upload error: $e');
           break;
         }
-      } catch (e) {
-        debugPrint('📍 Offline upload error: $e');
-        // Likely a parsing error, discard
-        toDelete.add(i);
       }
+      
+      // Clear the offline queue if all chunks were processed successfully
+      if (successfulChunks == chunks.length) {
+        await _offlineBox.clear();
+        debugPrint('📍 ✅ Batch update complete: $totalSent sent to server');
+        
+        // Check for high duplicate rate and log warning
+        final totalInBatch = totalSent + totalServerDuplicates;
+        if (totalInBatch > 0) {
+          final duplicateRate = totalServerDuplicates / totalInBatch;
+          if (duplicateRate > 0.3) {
+            debugPrint('📍 ⚠️ WARNING: High duplicate rate (${(duplicateRate * 100).toStringAsFixed(1)}%). '
+                'Consider increasing MIN_TIME_DELTA or MIN_DISTANCE thresholds.');
+          }
+        }
+      } else {
+        debugPrint('📍 ⚠️ Partial batch send: $successfulChunks/${chunks.length} chunks processed');
+      }
+      
+    } finally {
+      _isSendingBatch = false;
+      notifyListeners();
     }
-    // Remove successfully sent or discarded entries
-    for (final idx in toDelete.reversed) {
-      await _offlineBox.deleteAt(idx);
-    }
-    notifyListeners();
   }
 
   /// No-op: buffer is not used anymore, only offline queue remains.
