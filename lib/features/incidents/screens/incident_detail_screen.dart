@@ -802,7 +802,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     debugPrint('═══════════════════════════════════════════════════');
     debugPrint('');
   }
-
+//qwerty
   Widget _buildContent(
     BuildContext context,
     Map<String, dynamic> incident,
@@ -1301,15 +1301,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           incidentId: widget.incidentId,
         ),
 
-        // ── Location Updates Button ──────────────────────
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: OutlinedButton.icon(
-            onPressed: () => _showLocationHistory(context),
-            icon: const Icon(Icons.timeline),
-            label: const Text('Show Location Update History'),
-          ),
-        ),
+        
       ],
     );
   }
