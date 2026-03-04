@@ -74,6 +74,10 @@ class ApiConstants {
   static const double maxAccuracyMeters = 50.0;
   /// Minimum distance in meters before sending a new location update (prevents jitter).
   static const double minDistanceMeters = 5.0;
+  /// Minimum time in seconds between location captures (prevents rapid duplicate points).
+  static const int minTimeDeltaSeconds = 3;
+  /// Maximum number of locations to send in a single batch request.
+  static const int batchChunkSize = 50;
 
   // Hive Box Names
   static const String locationQueueBox = 'location_queue';
