@@ -77,7 +77,8 @@ class ApiConstants {
 
   // Location Accuracy Thresholds
   /// Maximum acceptable GPS accuracy in meters. Positions with worse accuracy are rejected.
-  static const double maxAccuracyMeters = 50.0;
+  /// Reduced from 50m to 20m to prevent jittery GPS readings.
+  static const double maxAccuracyMeters = 20.0;
   /// Minimum distance in meters before sending a new location update (prevents jitter).
   static const double minDistanceMeters = 5.0;
   /// Minimum time in seconds between location captures (prevents rapid duplicate points).

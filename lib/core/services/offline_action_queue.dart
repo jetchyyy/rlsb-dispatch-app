@@ -15,11 +15,17 @@ class PendingAction {
 
   final String? notes;
 
+  // GPS coordinates at moment of action (for accurate marker placement)
+  final double? latitude;
+  final double? longitude;
+
   PendingAction({
     required this.incidentId,
     required this.action,
     required this.recordedAt,
     this.notes,
+    this.latitude,
+    this.longitude,
   });
 
   Map<String, dynamic> toJson() => {
@@ -27,6 +33,8 @@ class PendingAction {
         'action': action,
         'recordedAt': recordedAt,
         if (notes != null) 'notes': notes,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
       };
 
   factory PendingAction.fromJson(Map<String, dynamic> json) => PendingAction(
@@ -34,6 +42,8 @@ class PendingAction {
         action: json['action'] as String,
         recordedAt: json['recordedAt'] as String,
         notes: json['notes'] as String?,
+        latitude: json['latitude'] as double?,
+        longitude: json['longitude'] as double?,
       );
 }
 

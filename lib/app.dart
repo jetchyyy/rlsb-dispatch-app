@@ -157,6 +157,9 @@ class _AppState extends State<App> {
     final locationProvider = context.read<LocationTrackingProvider>();
     final responseProvider = context.read<IncidentResponseProvider>();
 
+    // Link location provider to incident provider for GPS capture in offline actions
+    incidentProvider.setLocationProvider(locationProvider);
+
     // When the responder taps "Respond" → switch to 5-second active tracking
     // and start the response lifecycle (en_route).
     incidentProvider.onRespondStarted = (incidentId) {
@@ -192,10 +195,17 @@ class _AppState extends State<App> {
     // When on-scene is reached (manual via incident action button)
     incidentProvider.onOnSceneReached = (incidentId) {
       debugPrint('📍 App: On-scene reached for incident #$incidentId');
+      debugPrint('📍   ResponseProvider status before: ${responseProvider.responseStatus}');
+      debugPrint('📍   ResponseProvider activeIncidentId: ${responseProvider.activeIncidentId}');
+      
       // Only mark on_scene if the response provider hasn't auto-detected it
       if (responseProvider.responseStatus != ResponseStatus.onScene) {
-        responseProvider.markOnScene();
+        debugPrint('📍   Calling responseProvider.markOnScene(incidentId: $incidentId)...');
+        responseProvider.markOnScene(incidentId: incidentId);
       }
+      
+      debugPrint('📍   ResponseProvider status after: ${responseProvider.responseStatus}');
+      debugPrint('📍   Setting locationProvider.responseStatus to: ${responseProvider.responseStatus}');
       locationProvider.responseStatus = responseProvider.responseStatus;
       BackgroundServiceInitializer.updateNotification(
         'PDRRMO Dispatch',

@@ -109,13 +109,16 @@ class LocationTrackingProvider extends ChangeNotifier {
   /// to ensure the next periodic capture will happen regardless of time/distance thresholds.
   set responseStatus(String value) {
     final statusChanged = _responseStatus != value;
+    debugPrint('📍 LocationTracking: responseStatus setter called');
+    debugPrint('📍   Old: $_responseStatus, New: $value, Changed: $statusChanged');
     _responseStatus = value;
-    debugPrint('📍 Response status updated to: $value');
+    debugPrint('📍   Response status updated to: $value');
     
     // Reset capture filters on status change to ensure next capture happens
     // This avoids forcing an immediate capture that might use stale GPS data
     if (statusChanged && _isTracking) {
-      debugPrint('📍 🔄 Status changed from $_lastCapturedStatus to $value — resetting filters for next capture');
+      debugPrint('📍 🔄 Status changed — resetting filters for next capture');
+      debugPrint('📍   Last captured: $_lastCapturedStatus, Current: $value');
       _lastCaptureTime = null; // Next capture will bypass time filter
       _lastPosition = null;    // Next capture will bypass distance filter
     }
@@ -321,11 +324,26 @@ class LocationTrackingProvider extends ChangeNotifier {
           position.longitude,
         );
         
-        // Reject if moved > 500m in < 10 seconds (unrealistic for ground movement)
-        // This catches GPS glitches and prevents trail jumps
+        // High-speed jump detection: Reject if moved > 500m in < 10 seconds
         if (timeDelta < 10 && distance > 500) {
           debugPrint(
-              '📍 ❌ Position rejected (jump detection): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is unrealistic');
+              '📍 ❌ Position rejected (high-speed jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is unrealistic');
+          return;
+        }
+        
+        // Mid-range jump detection: Reject 50-200m jumps in very short time windows
+        // This catches GPS glitches while allowing legitimate fast movement over longer periods
+        if (timeDelta < 5 && distance > 50 && distance <= 200) {
+          debugPrint(
+              '📍 ❌ Position rejected (mid-range jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s looks like GPS glitch');
+          return;
+        }
+        
+        // Close-range jump detection: Reject 30-50m jumps in extremely short windows
+        // Catches the specific jitter pattern described by user
+        if (timeDelta < 3 && distance > 30) {
+          debugPrint(
+              '📍 ❌ Position rejected (close-range jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is too fast');
           return;
         }
         
@@ -363,6 +381,17 @@ class LocationTrackingProvider extends ChangeNotifier {
 
       // Use current system time for timestamp (more reliable than GPS timestamp)
       final timestamp = DateTime.now().toUtc().toIso8601String();
+      
+      // Debug: Show both UTC and local time for comparison
+      final localTime = DateTime.now().toIso8601String();
+      final utcTime = timestamp;
+      debugPrint('📍 🕐 Timestamp DEBUG:');
+      debugPrint('   Local Time: $localTime');
+      debugPrint('   UTC Time:   $utcTime');
+      debugPrint('   Timezone offset: ${DateTime.now().timeZoneOffset}');
+      if (!utcTime.endsWith('Z')) {
+        debugPrint('   ⚠️ WARNING: UTC timestamp does not end with Z!');
+      }
 
       final entry = <String, dynamic>{
         'latitude': position.latitude,
@@ -383,6 +412,7 @@ class LocationTrackingProvider extends ChangeNotifier {
           'lng=${position.longitude.toStringAsFixed(6)}, '
           'acc=${position.accuracy.toStringAsFixed(1)}m, '
           'timestamp=$timestamp');
+      debugPrint('📍    response_status: $_responseStatus, incident_id: $_activeIncidentId');
 
       // Try to send immediately
       try {
@@ -402,11 +432,16 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint(
             '📍 Upload failed (${e.response?.statusCode}): ${e.message}');
         // Save to offline queue for retry
-        _offlineBox.add(jsonEncode(entry));
+        final jsonEntry = jsonEncode(entry);
+        _offlineBox.add(jsonEntry);
+        debugPrint('📍 💾 Stored in offline queue: ${jsonEntry.substring(0, 100)}...');
+        debugPrint('   Queue size: ${_offlineBox.length} entries');
         notifyListeners(); // Update UI count
       } catch (e) {
         debugPrint('📍 Upload error: $e');
-        _offlineBox.add(jsonEncode(entry));
+        final jsonEntry = jsonEncode(entry);
+        _offlineBox.add(jsonEntry);
+        debugPrint('📍 💾 Stored in offline queue due to error');
         notifyListeners(); // Update UI count
       }
     } catch (e) {
@@ -535,6 +570,20 @@ class LocationTrackingProvider extends ChangeNotifier {
       // Split into chunks to avoid overwhelming the server
       final chunks = _splitIntoChunks(deduplicated, ApiConstants.batchChunkSize);
       debugPrint('📍 Sending ${deduplicated.length} locations in ${chunks.length} batch(es)');
+      
+      // Debug: Show sample of what's being sent
+      if (deduplicated.isNotEmpty) {
+        final sample = deduplicated.first;
+        debugPrint('📍 📤 BATCH SAMPLE (first entry):');
+        debugPrint('   timestamp: ${sample['timestamp']}');
+        debugPrint('   response_status: ${sample['response_status']}');
+        debugPrint('   incident_id: ${sample['incident_id']}');
+        debugPrint('   lat/lng: ${sample['latitude']}, ${sample['longitude']}');
+        final ts = sample['timestamp'] as String?;
+        if (ts != null && !ts.endsWith('Z')) {
+          debugPrint('   ⚠️ WARNING: Batch timestamp does not end with Z!');
+        }
+      }
       
       int totalSent = 0;
       int totalServerDuplicates = 0;

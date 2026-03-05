@@ -146,10 +146,27 @@ class IncidentResponseProvider extends ChangeNotifier {
   ///
   /// Records the arrival timestamp for response time calculation.
   /// Can be called manually (button) or automatically via [checkArrival].
-  Future<void> markOnScene() async {
-    if (_activeIncidentId == null) return;
+  /// 
+  /// [incidentId]: Optional. If the provider has no active incident but an
+  /// incidentId is provided (e.g., offline scenario), it will initialize.
+  Future<void> markOnScene({int? incidentId}) async {
+    // Initialize if no active incident but incidentId provided (offline scenario)
+    if (_activeIncidentId == null && incidentId != null) {
+      debugPrint('🚨 IncidentResponse: No active incident, initializing with #$incidentId');
+      _activeIncidentId = incidentId;
+      _dispatchTime ??= DateTime.now(); // For offline scenarios
+    }
 
+    // Still guard against both being null
+    if (_activeIncidentId == null) {
+      debugPrint('⚠️ IncidentResponse: Cannot mark on_scene - no active incident!');
+      return;
+    }
+
+    debugPrint('🚨 IncidentResponse: markOnScene() called for incident #$_activeIncidentId');
+    debugPrint('🚨   Old status: $_responseStatus');
     _responseStatus = ResponseStatus.onScene;
+    debugPrint('🚨   New status: $_responseStatus');
     _arrivalTime = DateTime.now();
 
     final responseTime = responseTimeElapsed;
@@ -244,11 +261,11 @@ class IncidentResponseProvider extends ChangeNotifier {
         await prefs.setString(_keyResponseStatus, _responseStatus);
         if (_dispatchTime != null) {
           await prefs.setString(
-              _keyDispatchTime, _dispatchTime!.toIso8601String());
+              _keyDispatchTime, _dispatchTime!.toUtc().toIso8601String());
         }
         if (_arrivalTime != null) {
           await prefs.setString(
-              _keyArrivalTime, _arrivalTime!.toIso8601String());
+              _keyArrivalTime, _arrivalTime!.toUtc().toIso8601String());
         }
         if (_incidentLat != null) {
           await prefs.setDouble(_keyIncidentLat, _incidentLat!);

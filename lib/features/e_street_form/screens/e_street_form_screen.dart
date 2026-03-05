@@ -295,7 +295,7 @@ class _EStreetFormScreenState extends State<EStreetFormScreen> {
         final responseProvider = context.read<IncidentResponseProvider>();
         if (responseProvider.activeIncidentId == widget.incidentId &&
             responseProvider.arrivalTime != null) {
-          arrivedStr = responseProvider.arrivalTime!.toIso8601String();
+          arrivedStr = responseProvider.arrivalTime!.toUtc().toIso8601String();
           debugPrint('📝 Using RESPONSE PROVIDER timestamp for arrival: $arrivedStr');
           debugPrint('  - This is the locally stored arrival time (works offline)');
         }
