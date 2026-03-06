@@ -47,3 +47,4 @@ app.*.map.json
 # Gradle Properties
 gradle.properties
 android/gradle.properties
+/android/gradle.properties

@@ -15,6 +15,7 @@ import 'core/providers/location_tracking_provider.dart';
 import 'core/services/background_service_initializer.dart';
 import 'core/services/location_service.dart';
 import 'core/services/map_preloader.dart';
+import 'core/services/sensor_fusion_service.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -46,6 +47,7 @@ void main() async {
   // ── Build dependency graph ─────────────────────────────────
   final apiClient = ApiClient(prefs);
   final locationService = LocationService();
+  final sensorFusionService = SensorFusionService();
 
   final authRemoteDataSource = AuthRemoteDataSourceImpl(apiClient);
   final authRepository = AuthRepositoryImpl(
@@ -66,6 +68,7 @@ void main() async {
     apiClient: apiClient,
     locationService: locationService,
     offlineBox: locationQueueBox,
+    sensorFusionService: sensorFusionService,
   );
 
   // Create incident response provider (pure state, no dependencies)

@@ -12,6 +12,9 @@ import '../constants/api_constants.dart';
 import '../models/batch_update_response.dart';
 import '../network/api_client.dart';
 import '../services/location_service.dart';
+import '../services/sensor_fusion_service.dart';
+import '../utils/kalman_filter.dart';
+import '../utils/path_simplifier.dart';
 
 /// Tracking mode for GPS updates.
 enum TrackingMode {
@@ -39,6 +42,13 @@ class LocationTrackingProvider extends ChangeNotifier {
   final ApiClient _api;
   final LocationService _locationService;
   final Box<String> _offlineBox;
+  final SensorFusionService _sensorFusion;
+  
+  /// Kalman filter for GPS position smoothing.
+  final KalmanFilter2D _kalmanFilter = KalmanFilter2D(
+    processNoise: ApiConstants.kalmanProcessNoise,
+    measurementNoiseBase: ApiConstants.kalmanMeasurementNoise,
+  );
 
   /// Completer that signals when state restoration is complete.
   final Completer<void> _initialized = Completer<void>();
@@ -55,9 +65,11 @@ class LocationTrackingProvider extends ChangeNotifier {
     required ApiClient apiClient,
     required LocationService locationService,
     required Box<String> offlineBox,
+    required SensorFusionService sensorFusionService,
   })  : _api = apiClient,
         _locationService = locationService,
-        _offlineBox = offlineBox {
+        _offlineBox = offlineBox,
+        _sensorFusion = sensorFusionService {
     _restoreState();
   }
 
@@ -163,6 +175,11 @@ class LocationTrackingProvider extends ChangeNotifier {
     debugPrint(
         '📍 Passive tracking started (every ${ApiConstants.passiveTrackingInterval.inSeconds}s)');
 
+    // Start sensor fusion for position smoothing
+    _sensorFusion.start();
+    _kalmanFilter.reset();
+    debugPrint('📍 🔧 Kalman filter reset, sensor fusion started');
+
     _startCaptureTimer(ApiConstants.passiveTrackingInterval);
     _startFlushTimer();
 
@@ -191,6 +208,13 @@ class LocationTrackingProvider extends ChangeNotifier {
     _errorMessage = null;
     debugPrint(
         '📍 Active tracking started for incident #$incidentId (every ${ApiConstants.activeTrackingInterval.inSeconds}s)');
+
+    // Start sensor fusion for position smoothing (or ensure it's running)
+    if (!_sensorFusion.isRunning) {
+      _sensorFusion.start();
+    }
+    _kalmanFilter.reset();
+    debugPrint('📍 🔧 Kalman filter reset for active tracking');
 
     _startCaptureTimer(ApiConstants.activeTrackingInterval);
     _startFlushTimer();
@@ -273,6 +297,11 @@ class LocationTrackingProvider extends ChangeNotifier {
     _isTracking = false;
     _activeIncidentId = null;
 
+    // Stop sensor fusion and reset filters
+    _sensorFusion.stop();
+    _kalmanFilter.reset();
+    debugPrint('📍 🔧 Kalman filter reset, sensor fusion stopped');
+
     // Clear persisted state on logout
     _clearState();
 
@@ -312,40 +341,58 @@ class LocationTrackingProvider extends ChangeNotifier {
         return;
       }
 
-      // ── Jump Detection Filter ─────────────────────────────────
-      // Reject positions that are impossibly far from last known position
-      // This prevents sharp deviations from GPS errors or spoofing
+      // ── Kalman Filter Smoothing ───────────────────────────────
+      // Get sensor fusion displacement estimate (if available)
+      double? sensorDisplacementLat;
+      double? sensorDisplacementLng;
+      
+      if (_sensorFusion.isRunning && _lastPosition != null) {
+        final displacement = _sensorFusion.getDisplacementDegrees(_lastPosition!.latitude);
+        sensorDisplacementLat = displacement.latDelta;
+        sensorDisplacementLng = displacement.lngDelta;
+        
+        if (_sensorFusion.totalDisplacement > 0.1) {
+          debugPrint('📍 🔧 Sensor fusion: ${_sensorFusion.totalDisplacement.toStringAsFixed(1)}m displacement estimated');
+        }
+        
+        // Reset sensor fusion displacement after using it
+        _sensorFusion.resetDisplacement();
+      }
+      
+      // Apply Kalman filter to smooth the GPS position
+      final timestamp = DateTime.now();
+      final kalmanResult = _kalmanFilter.update(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+        timestamp: timestamp,
+        sensorDisplacementLat: sensorDisplacementLat,
+        sensorDisplacementLng: sensorDisplacementLng,
+      );
+      
+      // Log Kalman filter results
+      final rawLat = position.latitude;
+      final rawLng = position.longitude;
+      final smoothedLat = kalmanResult.smoothedLatitude;
+      final smoothedLng = kalmanResult.smoothedLongitude;
+      
+      if (kalmanResult.wasOutlier) {
+        debugPrint('📍 🔧 Kalman OUTLIER detected: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m, confidence=${(kalmanResult.confidence * 100).toStringAsFixed(0)}%');
+        debugPrint('📍    Raw: ($rawLat, $rawLng) → Smoothed: ($smoothedLat, $smoothedLng)');
+      } else if (kalmanResult.residualMeters > 5) {
+        debugPrint('📍 🔧 Kalman smoothed: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m');
+      }
+      
+      // ── Jitter Filter ─────────────────────────────────────────
+      // Skip if barely moved (using smoothed position)
       if (_lastPosition != null && _lastCaptureTime != null) {
-        final timeDelta = DateTime.now().difference(_lastCaptureTime!).inSeconds;
+        final timeDelta = timestamp.difference(_lastCaptureTime!).inSeconds;
         final distance = _locationService.distanceBetween(
           _lastPosition!.latitude,
           _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
+          smoothedLat,
+          smoothedLng,
         );
-        
-        // High-speed jump detection: Reject if moved > 500m in < 10 seconds
-        if (timeDelta < 10 && distance > 500) {
-          debugPrint(
-              '📍 ❌ Position rejected (high-speed jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is unrealistic');
-          return;
-        }
-        
-        // Mid-range jump detection: Reject 50-200m jumps in very short time windows
-        // This catches GPS glitches while allowing legitimate fast movement over longer periods
-        if (timeDelta < 5 && distance > 50 && distance <= 200) {
-          debugPrint(
-              '📍 ❌ Position rejected (mid-range jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s looks like GPS glitch');
-          return;
-        }
-        
-        // Close-range jump detection: Reject 30-50m jumps in extremely short windows
-        // Catches the specific jitter pattern described by user
-        if (timeDelta < 3 && distance > 30) {
-          debugPrint(
-              '📍 ❌ Position rejected (close-range jump): ${distance.toStringAsFixed(0)}m in ${timeDelta}s is too fast');
-          return;
-        }
         
         // Skip only if BOTH time < threshold AND distance < threshold (jitter scenario)
         if (timeDelta < ApiConstants.minTimeDeltaSeconds && 
@@ -355,36 +402,21 @@ class LocationTrackingProvider extends ChangeNotifier {
           return;
         }
       }
-      
-      // Distance-only filter for first position after _lastPosition is set
-      if (_lastPosition != null && _lastCaptureTime == null) {
-        final distance = _locationService.distanceBetween(
-          _lastPosition!.latitude,
-          _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        if (distance < ApiConstants.minDistanceMeters) {
-          debugPrint(
-              '📍 ⏭️  Position skipped: moved only ${distance.toStringAsFixed(1)}m < ${ApiConstants.minDistanceMeters}m threshold');
-          _lastPosition = position;
-          return;
-        }
-      }
 
-      _lastPosition = position;
-      _lastCaptureTime = DateTime.now();
+      // Update state with smoothed position (create a mock Position for callback)
+      _lastPosition = position; // Keep raw for next iteration's distance calc baseline
+      _lastCaptureTime = timestamp;
       _lastCapturedStatus = _responseStatus;
 
-      // Notify listeners (e.g. auto-arrival detection)
+      // Notify listeners with raw position (for auto-arrival detection)
       onPositionCaptured?.call(position);
 
       // Use current system time for timestamp (more reliable than GPS timestamp)
-      final timestamp = DateTime.now().toUtc().toIso8601String();
+      final timestampStr = timestamp.toUtc().toIso8601String();
       
       // Debug: Show both UTC and local time for comparison
       final localTime = DateTime.now().toIso8601String();
-      final utcTime = timestamp;
+      final utcTime = timestampStr;
       debugPrint('📍 🕐 Timestamp DEBUG:');
       debugPrint('   Local Time: $localTime');
       debugPrint('   UTC Time:   $utcTime');
@@ -393,15 +425,16 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('   ⚠️ WARNING: UTC timestamp does not end with Z!');
       }
 
+      // Use SMOOTHED coordinates in the entry (this is the key change!)
       final entry = <String, dynamic>{
-        'latitude': position.latitude,
-        'longitude': position.longitude,
+        'latitude': smoothedLat,
+        'longitude': smoothedLng,
         'accuracy': position.accuracy,
         'altitude': position.altitude,
         'speed': position.speed,
         'heading': position.heading,
         'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
-        'timestamp': timestamp,
+        'timestamp': timestampStr,
         'response_status': _responseStatus,
       };
       if (_activeIncidentId != null) {
@@ -567,9 +600,56 @@ class LocationTrackingProvider extends ChangeNotifier {
         return;
       }
       
+      // ── Path Simplification ───────────────────────────────────
+      // Apply velocity-based outlier removal and Douglas-Peucker simplification
+      // This reduces data sent to server and ensures clean trails
+      final beforeSimplification = deduplicated.length;
+      
+      // Step 1: Remove velocity-based outliers (superhuman speed)
+      final noOutliers = PathSimplifier.removeVelocityOutliers(
+        deduplicated,
+        maxSpeedMs: ApiConstants.maxReasonableSpeedMs,
+      );
+      
+      // Step 2: Apply Douglas-Peucker path simplification
+      List<Map<String, dynamic>> simplified;
+      if (noOutliers.length >= 3) {
+        final points = PathSimplifier.toLatLngList(noOutliers);
+        final simplifiedPoints = PathSimplifier.simplifyDouglasPeucker(
+          points,
+          epsilonMeters: ApiConstants.pathSimplificationEpsilon,
+        );
+        simplified = PathSimplifier.toLocationMaps(simplifiedPoints, noOutliers);
+      } else {
+        simplified = noOutliers;
+      }
+      
+      final afterSimplification = simplified.length;
+      if (beforeSimplification != afterSimplification) {
+        debugPrint('📍 📐 Path simplified: $beforeSimplification → $afterSimplification points '
+            '(${beforeSimplification - afterSimplification} removed)');
+      }
+      
       // Split into chunks to avoid overwhelming the server
-      final chunks = _splitIntoChunks(deduplicated, ApiConstants.batchChunkSize);
-      debugPrint('📍 Sending ${deduplicated.length} locations in ${chunks.length} batch(es)');
+      final chunks = _splitIntoChunks(simplified, ApiConstants.batchChunkSize);
+      debugPrint('📍 Sending ${simplified.length} locations in ${chunks.length} batch(es)');
+      
+      // Debug: Show sample of what's being sent
+      if (simplified.isNotEmpty) {
+        final sample = simplified.first;
+        debugPrint('📍 📤 BATCH SAMPLE (first entry):');
+        debugPrint('   timestamp: ${sample['timestamp']}');
+        debugPrint('   response_status: ${sample['response_status']}');
+        debugPrint('   incident_id: ${sample['incident_id']}');
+        debugPrint('   lat/lng: ${sample['latitude']}, ${sample['longitude']}');
+        if (sample['simplified'] == true) {
+          debugPrint('   📐 This point was simplified by Douglas-Peucker');
+        }
+        final ts = sample['timestamp'] as String?;
+        if (ts != null && !ts.endsWith('Z')) {
+          debugPrint('   ⚠️ WARNING: Batch timestamp does not end with Z!');
+        }
+      }
       
       // Debug: Show sample of what's being sent
       if (deduplicated.isNotEmpty) {

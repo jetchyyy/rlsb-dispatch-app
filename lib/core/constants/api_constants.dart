@@ -86,6 +86,20 @@ class ApiConstants {
   /// Maximum number of locations to send in a single batch request.
   static const int batchChunkSize = 50;
 
+  // Kalman Filter / GPS Smoothing Constants
+  /// Kalman filter process noise. Higher = more responsive, less smooth.
+  static const double kalmanProcessNoise = 0.00001;
+  /// Kalman filter base measurement noise. Scaled by GPS accuracy.
+  static const double kalmanMeasurementNoise = 0.00005;
+  /// Douglas-Peucker path simplification epsilon (meters).
+  /// Points within this distance of the simplified line are removed.
+  static const double pathSimplificationEpsilon = 5.0;
+  /// Maximum reasonable speed in m/s for outlier detection (~180 km/h).
+  static const double maxReasonableSpeedMs = 50.0;
+  /// Minimum confidence score from Kalman filter to accept a measurement.
+  /// Below this, the smoothed/predicted position is used instead.
+  static const double minKalmanConfidence = 0.3;
+
   // Hive Box Names
   static const String locationQueueBox = 'location_queue';
 

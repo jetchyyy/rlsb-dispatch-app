@@ -49,7 +49,7 @@ class PreLogoutTurnoverApiService {
       MapEntry('turnover_date', turnoverDate.toIso8601String().split('T').first),
     );
     formData.fields.add(MapEntry('notes', notes));
-    formData.fields.add(MapEntry('device_time', deviceTime.toIso8601String()));
+    formData.fields.add(MapEntry('device_time', deviceTime.toUtc().toIso8601String()));
 
     if (userId != null) {
       formData.fields.add(MapEntry('user_id', userId.toString()));
