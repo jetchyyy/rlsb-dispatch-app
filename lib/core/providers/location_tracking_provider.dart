@@ -376,8 +376,8 @@ class LocationTrackingProvider extends ChangeNotifier {
         final rawDistance = _locationService.distanceBetween(
           _lastPosition!.latitude,
           _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
+          smoothedLat,
+          smoothedLng,
         );
         
         // Reject if moved > 500m in < 10 seconds (unrealistic for ground vehicles)
