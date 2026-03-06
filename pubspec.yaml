@@ -75,6 +75,7 @@ dependencies:
   json_annotation: ^4.8.1
   audioplayers: ^6.5.1
   flutter_tts: ^4.2.5
+  camera: ^0.12.0
 
 dev_dependencies:
   flutter_test:
@@ -92,5 +93,6 @@ flutter:
     - assets/images/header.jpg
     - assets/images/hero1.png
     - assets/images/pdrrmologo.png
+    - assets/images/pdrrmosplash.png
     - assets/sounds/alarm.wav
     - assets/pdf/terms-v2.pdf

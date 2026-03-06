@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/entities/user.dart';
 import '../../domain/usecases/login_user.dart';
 import '../../domain/usecases/logout_user.dart';
@@ -17,12 +18,29 @@ class AuthProvider extends ChangeNotifier {
   AuthState _state = AuthState.initial;
   User? _user;
   String? _errorMessage;
+  bool _hasCompletedPreDispatch = false;
 
   AuthState get state => _state;
   User? get user => _user;
   String? get errorMessage => _errorMessage;
+  bool get hasCompletedPreDispatch => _hasCompletedPreDispatch;
   bool get isAuthenticated => _state == AuthState.authenticated;
   bool get isLoading => _state == AuthState.loading;
+
+  Future<void> _loadPreDispatchState() async {
+    if (_user == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    _hasCompletedPreDispatch =
+        prefs.getBool('has_completed_pre_dispatch_${_user!.id}') ?? false;
+  }
+
+  Future<void> completePreDispatch() async {
+    if (_user == null) return;
+    _hasCompletedPreDispatch = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('has_completed_pre_dispatch_${_user!.id}', true);
+    notifyListeners();
+  }
 
   Future<void> login(String email, String password) async {
     _state = AuthState.loading;
@@ -36,15 +54,18 @@ class AuthProvider extends ChangeNotifier {
         _state = AuthState.error;
         _errorMessage = failure.message;
         _user = null;
-        notifyListeners();
       },
       (user) {
         _state = AuthState.authenticated;
         _user = user;
         _errorMessage = null;
-        notifyListeners();
       },
     );
+
+    if (_state == AuthState.authenticated) {
+      await _loadPreDispatchState();
+    }
+    notifyListeners();
   }
 
   Future<void> logout() async {
@@ -59,10 +80,15 @@ class AuthProvider extends ChangeNotifier {
         _errorMessage = failure.message;
         notifyListeners();
       },
-      (_) {
+      (_) async {
+        if (_user != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('has_completed_pre_dispatch_${_user!.id}');
+        }
         _state = AuthState.unauthenticated;
         _user = null;
         _errorMessage = null;
+        _hasCompletedPreDispatch = false;
         notifyListeners();
       },
     );
@@ -84,7 +110,6 @@ class AuthProvider extends ChangeNotifier {
       (failure) {
         _state = AuthState.unauthenticated;
         _user = null;
-        notifyListeners();
       },
       (user) {
         if (user != null) {
@@ -95,15 +120,19 @@ class AuthProvider extends ChangeNotifier {
           _state = AuthState.unauthenticated;
           _user = null;
         }
-        notifyListeners();
       },
     );
+
+    if (_state == AuthState.authenticated) {
+      await _loadPreDispatchState();
+    }
+    notifyListeners();
   }
 
   // Refresh user profile from backend
   Future<void> refreshProfile() async {
     debugPrint('🔄 Refreshing user profile from backend...');
-    
+
     final result = await loginUser.repository.refreshUserProfile();
 
     result.fold(
