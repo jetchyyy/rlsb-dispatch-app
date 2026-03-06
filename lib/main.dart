@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -16,6 +15,7 @@ import 'core/services/background_service_initializer.dart';
 import 'core/services/location_service.dart';
 import 'core/services/map_preloader.dart';
 import 'core/services/sensor_fusion_service.dart';
+import 'core/services/workmanager_service.dart';
 import 'core/storage/token_storage.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -88,6 +88,9 @@ void main() async {
   // Initialize background service for keeping GPS alive when backgrounded
   await BackgroundServiceInitializer.initialize();
 
+  // Initialize WorkManager for periodic background tasks
+  await WorkManagerService.initialize();
+
   // If user is already authenticated, start location tracking + background service
   if (authProvider.isAuthenticated) {
     // Wait for location provider to restore any saved state (active incident)
@@ -112,6 +115,10 @@ void main() async {
     }
 
     await BackgroundServiceInitializer.startService();
+    
+    // Register WorkManager tasks for offline sync and health monitoring
+    await WorkManagerService.registerLocationSync();
+    await WorkManagerService.registerTrackingHealthCheck();
   }
 
   // Preload map tiles in background (non-blocking)
