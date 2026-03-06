@@ -38,7 +38,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (authProvider.isAuthenticated) {
-      context.go('/pre-dashboard-checklist');
+      if (authProvider.hasCompletedPreDispatch) {
+        context.go('/dashboard');
+      } else {
+        context.go('/pre-dashboard-checklist');
+      }
     } else if (authProvider.errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

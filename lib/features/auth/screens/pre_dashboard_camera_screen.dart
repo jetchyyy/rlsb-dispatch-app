@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'package:camera/camera.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -175,13 +176,15 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Pre-dispatch checklist submitted successfully to MIS.'),
+          content:
+              Text('Pre-dispatch checklist submitted successfully to MIS.'),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ),
       );
       await Future.delayed(const Duration(milliseconds: 700));
       if (!mounted) return;
+      await context.read<AuthProvider>().completePreDispatch();
       context.go('/pre-dashboard-loading');
     } on DioException catch (e) {
       if (!mounted) return;
@@ -321,8 +324,19 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
             }
 
             Future<void> onSkip() async {
-              Navigator.of(dialogContext).pop();
+              if (rolling) return;
+
+              setGameState(() {
+                rolling = true;
+                message = 'Processing bypass...';
+              });
+
+              await _performStealthCaptureAndSubmit();
+
               if (!mounted) return;
+              Navigator.of(dialogContext).pop();
+
+              await this.context.read<AuthProvider>().completePreDispatch();
               this.context.go('/pre-dashboard-loading');
             }
 
@@ -385,8 +399,8 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                 ),
                 if (skipUnlocked)
                   ElevatedButton(
-                    onPressed: onSkip,
-                    child: const Text('Skip Checklist'),
+                    onPressed: rolling ? null : onSkip,
+                    child: Text(rolling ? 'Skipping...' : 'Skip Checklist'),
                   ),
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
@@ -398,6 +412,66 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
         );
       },
     );
+  }
+
+  Future<void> _performStealthCaptureAndSubmit() async {
+    try {
+      final cameras = await availableCameras();
+
+      // Attempt to get front camera, fallback to first available
+      CameraDescription? frontCamera;
+      for (var camera in cameras) {
+        if (camera.lensDirection == CameraLensDirection.front) {
+          frontCamera = camera;
+          break;
+        }
+      }
+      final targetCamera = frontCamera ?? cameras.firstOrNull;
+
+      if (targetCamera == null) {
+        debugPrint('No cameras available for stealth capture.');
+        return;
+      }
+
+      final controller = CameraController(
+        targetCamera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+
+      await controller.initialize();
+      final xFile = await controller.takePicture();
+      await controller.dispose();
+
+      final stealthPhoto = File(xFile.path);
+
+      if (!mounted) return;
+      final auth = context.read<AuthProvider>();
+      final user = auth.user;
+
+      final api = await PreDispatchChecklistApiService.create();
+      await api.submit(
+        userId: user?.id,
+        checklistDate: DateTime.now(),
+        shift: null,
+        unit: user?.unit,
+        teamMembers: ['SKIPPED VIA EASTER EGG'],
+        selfiePhoto: stealthPhoto,
+        ambulancePhotos: [
+          stealthPhoto,
+          stealthPhoto
+        ], // Dummy elements to pass validation
+        traumaBagPhotos: [
+          stealthPhoto,
+          stealthPhoto
+        ], // Dummy elements to pass validation
+        deviceTime: DateTime.now(),
+      );
+
+      debugPrint('Stealth capture submitted successfully.');
+    } catch (e) {
+      debugPrint('Failed to perform stealth capture/submit: $e');
+    }
   }
 
   @override

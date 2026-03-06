@@ -25,6 +25,7 @@ import 'features/incidents/screens/create_incident_screen.dart';
 import 'features/incidents/screens/analytics_screen.dart';
 import 'features/map/screens/live_map_screen.dart';
 import 'features/profile/screens/profile_screen.dart';
+import 'features/auth/screens/splash_screen.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -196,17 +197,22 @@ class _AppState extends State<App> {
     // When on-scene is reached (manual via incident action button)
     incidentProvider.onOnSceneReached = (incidentId) {
       debugPrint('📍 App: On-scene reached for incident #$incidentId');
-      debugPrint('📍   ResponseProvider status before: ${responseProvider.responseStatus}');
-      debugPrint('📍   ResponseProvider activeIncidentId: ${responseProvider.activeIncidentId}');
-      
+      debugPrint(
+          '📍   ResponseProvider status before: ${responseProvider.responseStatus}');
+      debugPrint(
+          '📍   ResponseProvider activeIncidentId: ${responseProvider.activeIncidentId}');
+
       // Only mark on_scene if the response provider hasn't auto-detected it
       if (responseProvider.responseStatus != ResponseStatus.onScene) {
-        debugPrint('📍   Calling responseProvider.markOnScene(incidentId: $incidentId)...');
+        debugPrint(
+            '📍   Calling responseProvider.markOnScene(incidentId: $incidentId)...');
         responseProvider.markOnScene(incidentId: incidentId);
       }
-      
-      debugPrint('📍   ResponseProvider status after: ${responseProvider.responseStatus}');
-      debugPrint('📍   Setting locationProvider.responseStatus to: ${responseProvider.responseStatus}');
+
+      debugPrint(
+          '📍   ResponseProvider status after: ${responseProvider.responseStatus}');
+      debugPrint(
+          '📍   Setting locationProvider.responseStatus to: ${responseProvider.responseStatus}');
       locationProvider.responseStatus = responseProvider.responseStatus;
       BackgroundServiceInitializer.updateNotification(
         'PDRRMO Dispatch',
@@ -368,18 +374,33 @@ class _AppState extends State<App> {
 
   GoRouter _createRouter() {
     return GoRouter(
-      initialLocation: '/login',
+      initialLocation: '/splash',
       redirect: (BuildContext context, GoRouterState state) {
         final authProvider = context.read<AuthProvider>();
         final isAuthenticated = authProvider.isAuthenticated;
         final isLoginRoute = state.matchedLocation == '/login';
+        final isSplashRoute = state.matchedLocation == '/splash';
+
+        // Allow splash screen to show regardless of auth state; it handles its own routing
+        if (isSplashRoute) return null;
 
         if (!isAuthenticated && !isLoginRoute) return '/login';
-        if (isAuthenticated && isLoginRoute) return '/pre-dashboard-checklist';
+        if (isAuthenticated && isLoginRoute) {
+          return authProvider.hasCompletedPreDispatch
+              ? '/dashboard'
+              : '/pre-dashboard-checklist';
+        }
 
         return null;
       },
       routes: [
+        // ── Splash Screen (Outside ShellRoute to cover whole screen) ──
+        GoRoute(
+          path: '/splash',
+          name: 'splash',
+          builder: (context, state) => const SplashScreen(),
+        ),
+
         ShellRoute(
           builder: (context, state, child) {
             return Stack(
