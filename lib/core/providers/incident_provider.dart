@@ -7,6 +7,7 @@ import '../constants/api_constants.dart';
 import '../network/api_client.dart';
 import '../services/incident_alarm_service.dart';
 import '../services/offline_action_queue.dart';
+import 'location_tracking_provider.dart';
 import '../../features/e_street_form/models/e_street_form_model.dart';
 import '../../features/e_street_form/services/offline_estreet_queue.dart';
 import '../../features/e_street_form/services/e_street_api_service.dart';
@@ -20,12 +21,20 @@ class IncidentProvider extends ChangeNotifier {
   final OfflineActionQueue _actionQueue = OfflineActionQueue();
   final OfflineEStreetQueue _estreetQueue = OfflineEStreetQueue();
 
+  // Reference to capture GPS coordinates for offline actions
+  LocationTrackingProvider? _locationProvider;
+
   IncidentProvider(this._api, {IncidentAlarmService? alarmService})
       : alarmService = alarmService ?? IncidentAlarmService() {
     // Initialize the offline queue asynchronously — safe because usage is
     // always after the first frame (buttons are only visible post-login).
     _actionQueue.init();
     _estreetQueue.init();
+  }
+
+  /// Link the location provider for GPS capture in offline actions.
+  void setLocationProvider(LocationTrackingProvider provider) {
+    _locationProvider = provider;
   }
 
   // ── State ──────────────────────────────────────────────────
@@ -389,7 +398,11 @@ class IncidentProvider extends ChangeNotifier {
         'recorded_at': action.recordedAt,
         if (action.notes != null && action.notes!.isNotEmpty)
           'notes': action.notes,
+        // Include GPS coordinates if captured
+        if (action.latitude != null) 'latitude': action.latitude,
+        if (action.longitude != null) 'longitude': action.longitude,
       };
+      debugPrint('📡 Sync data: $data');
       await _api.post(endpoint, data: data);
       await _actionQueue.remove(action.incidentId, action.action);
       debugPrint(
@@ -442,7 +455,7 @@ class IncidentProvider extends ChangeNotifier {
     await _estreetQueue.enqueue(PendingEStreetForm(
       incidentId: incidentId,
       form: form,
-      recordedAt: DateTime.now().toIso8601String(),
+      recordedAt: DateTime.now().toUtc().toIso8601String(),
     ));
     debugPrint('📝 E-Street form queued offline for incident #$incidentId');
 
@@ -676,7 +689,7 @@ class IncidentProvider extends ChangeNotifier {
       debugPrint('═══════════════════════════════════════════════════');
       debugPrint('  📡 Endpoint : GET $fullUrl');
       debugPrint('  📎 Params   : $params');
-      debugPrint('  🕐 Time     : ${DateTime.now().toIso8601String()}');
+      debugPrint('  🕐 Time     : ${DateTime.now().toUtc().toIso8601String()}');
       debugPrint('  🔑 Token    : ${_tokenPreview()}');
       debugPrint('───────────────────────────────────────────────────');
     }
@@ -1085,7 +1098,26 @@ class IncidentProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = notes != null && notes.isNotEmpty ? {'notes': notes} : null;
+      // ── ALWAYS capture GPS coordinates for accurate marker placement ──────
+      final lastPos = _locationProvider?.lastPosition;
+      final lat = lastPos?.latitude;
+      final lng = lastPos?.longitude;
+      final recordedAt = DateTime.now().toUtc().toIso8601String();
+      
+      if (lat != null && lng != null) {
+        debugPrint('📍 Captured GPS for action: ($lat, $lng)');
+      } else {
+        debugPrint('⚠️ No GPS coordinates available for action');
+      }
+      
+      final data = <String, dynamic>{
+        'recorded_at': recordedAt,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (lat != null) 'latitude': lat,
+        if (lng != null) 'longitude': lng,
+      };
+      
+      debugPrint('  📤 Sending data: $data');
       final response = await _api.post(endpoint, data: data);
       debugPrint('  ✅ Action completed: ${response.statusCode}');
 
@@ -1104,7 +1136,19 @@ class IncidentProvider extends ChangeNotifier {
     } on DioException catch (e) {
       // ── Offline / network error → enqueue ─────────────────────
       if (isOfflineException(e)) {
-        final recordedAt = DateTime.now().toIso8601String();
+        final recordedAt = DateTime.now().toUtc().toIso8601String();
+        
+        // Capture current GPS coordinates for accurate marker placement
+        final lastPos = _locationProvider?.lastPosition;
+        final lat = lastPos?.latitude;
+        final lng = lastPos?.longitude;
+        
+        if (lat != null && lng != null) {
+          debugPrint('📍 Captured GPS for offline action: ($lat, $lng)');
+        } else {
+          debugPrint('⚠️ No GPS coordinates available for offline action');
+        }
+        
         debugPrint(
             '📵 Offline — queuing ${action} for incident #$id to sync later');
         await _actionQueue.enqueue(PendingAction(
@@ -1112,6 +1156,8 @@ class IncidentProvider extends ChangeNotifier {
           action: action,
           recordedAt: recordedAt,
           notes: notes,
+          latitude: lat,
+          longitude: lng,
         ));
 
         // Inject local timestamp into incident data for offline use
