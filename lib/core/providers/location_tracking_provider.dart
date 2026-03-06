@@ -651,6 +651,20 @@ class LocationTrackingProvider extends ChangeNotifier {
         }
       }
       
+      // Debug: Show sample of what's being sent
+      if (deduplicated.isNotEmpty) {
+        final sample = deduplicated.first;
+        debugPrint('📍 📤 BATCH SAMPLE (first entry):');
+        debugPrint('   timestamp: ${sample['timestamp']}');
+        debugPrint('   response_status: ${sample['response_status']}');
+        debugPrint('   incident_id: ${sample['incident_id']}');
+        debugPrint('   lat/lng: ${sample['latitude']}, ${sample['longitude']}');
+        final ts = sample['timestamp'] as String?;
+        if (ts != null && !ts.endsWith('Z')) {
+          debugPrint('   ⚠️ WARNING: Batch timestamp does not end with Z!');
+        }
+      }
+      
       int totalSent = 0;
       int totalServerDuplicates = 0;
       int successfulChunks = 0;
