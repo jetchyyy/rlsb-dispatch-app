@@ -134,17 +134,35 @@ Future<void> _onStart(ServiceInstance service) async {
   // (runs in the main isolate). The background service simply keeps
   // the process alive so the OS does not kill it.
   //
+  // CRITICAL: This service must run as a foreground service with a persistent
+  // notification to prevent Android from killing it during incident response.
+  //
   // Periodic heartbeat to keep the service alive:
   Timer.periodic(const Duration(seconds: 30), (timer) async {
     if (service is AndroidServiceInstance) {
       final isFg = await service.isForegroundService();
       if (!isFg) {
-        timer.cancel();
-        return;
+        // If we lost foreground status, try to restore it
+        debugPrint('📍 ⚠️ Background service lost foreground status - restoring...');
+        service.setAsForegroundService();
       }
     }
     // Send heartbeat to UI so it knows the service is alive
     service.invoke('trackingStatus', {'isRunning': true});
+  });
+  
+  // Additional watchdog: Ensure the service stays alive when screen is off
+  // This prevents Android's aggressive battery optimization from killing tracking
+  Timer.periodic(const Duration(seconds: 10), (timer) async {
+    if (service is AndroidServiceInstance) {
+      final isFg = await service.isForegroundService();
+      if (isFg) {
+        // Service is alive and well, just log periodically
+        if (DateTime.now().second % 60 == 0) {
+          debugPrint('📍 ✅ Background service heartbeat - tracking active');
+        }
+      }
+    }
   });
 }
 

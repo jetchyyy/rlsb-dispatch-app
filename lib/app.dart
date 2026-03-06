@@ -7,6 +7,7 @@ import 'core/providers/incident_provider.dart';
 import 'core/providers/incident_response_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
 import 'core/services/background_service_initializer.dart';
+import 'core/services/workmanager_service.dart';
 import 'core/services/tts_service.dart';
 import 'core/services/geocoding_service.dart';
 import 'core/widgets/incident_alert_overlay.dart';
@@ -305,6 +306,11 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.startPassiveTracking();
         BackgroundServiceInitializer.startService();
+        
+        // Register WorkManager tasks for background sync and monitoring
+        WorkManagerService.registerLocationSync();
+        WorkManagerService.registerTrackingHealthCheck();
+        debugPrint('📍 App: WorkManager tasks registered');
 
         // ── Configure unit-based incident filtering ────────────
         final incidentProvider = context.read<IncidentProvider>();
@@ -324,6 +330,10 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.stopAllTracking();
         BackgroundServiceInitializer.stopService();
+        
+        // Cancel all WorkManager background tasks
+        WorkManagerService.cancelAll();
+        debugPrint('📍 App: WorkManager tasks cancelled');
 
         // Clear unit filter
         final incidentProvider = context.read<IncidentProvider>();

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
 import '../models/batch_update_response.dart';
 import '../network/api_client.dart';
+import '../services/background_service_initializer.dart';
 import '../services/location_service.dart';
 import '../services/sensor_fusion_service.dart';
 import '../utils/kalman_filter.dart';
@@ -209,6 +210,20 @@ class LocationTrackingProvider extends ChangeNotifier {
     debugPrint(
         '📍 Active tracking started for incident #$incidentId (every ${ApiConstants.activeTrackingInterval.inSeconds}s)');
 
+    // !! CRITICAL: Ensure background service is running as foreground service
+    // This prevents the OS from killing the app when backgrounded
+    try {
+      await BackgroundServiceInitializer.startService();
+      BackgroundServiceInitializer.setTrackingMode('active', incidentId: incidentId);
+      BackgroundServiceInitializer.updateNotification(
+        'Emergency Response Active',
+        'Tracking location for incident #$incidentId',
+      );
+      debugPrint('📍 ✅ Background foreground service activated for incident #$incidentId');
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to start background service: $e');
+    }
+
     // Start sensor fusion for position smoothing (or ensure it's running)
     if (!_sensorFusion.isRunning) {
       _sensorFusion.start();
@@ -263,6 +278,18 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint(
             '📍 Cleared ${toDelete.length} offline pings for incident #$oldIncidentId');
       }
+    }
+
+    // Update background service notification to reflect passive mode
+    try {
+      BackgroundServiceInitializer.setTrackingMode('passive');
+      BackgroundServiceInitializer.updateNotification(
+        'PDRRMO Dispatch',
+        'Location tracking is active',
+      );
+      debugPrint('📍 Background service updated to passive mode');
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to update background service: $e');
     }
 
     // Persist cleared state
@@ -339,6 +366,26 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint(
             '📍 ❌ Position rejected: accuracy ${position.accuracy.toStringAsFixed(1)}m > ${ApiConstants.maxAccuracyMeters}m threshold');
         return;
+      }
+
+      // ── Jump Detection Filter (RESTORED) ──────────────────────
+      // Reject GPS glitches BEFORE attempting to smooth them
+      // This prevents Kalman filter from averaging bad data into output
+      if (_lastPosition != null && _lastCaptureTime != null) {
+        final timeDelta = DateTime.now().difference(_lastCaptureTime!).inSeconds;
+        final rawDistance = _locationService.distanceBetween(
+          _lastPosition!.latitude,
+          _lastPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        
+        // Reject if moved > 500m in < 10 seconds (unrealistic for ground vehicles)
+        if (timeDelta < 10 && rawDistance > 500) {
+          debugPrint(
+              '📍 ❌ GPS glitch detected: ${rawDistance.toStringAsFixed(0)}m in ${timeDelta}s is impossible — SKIPPING');
+          return;  // Don't even try to smooth this
+        }
       }
 
       // ── Kalman Filter Smoothing ───────────────────────────────
@@ -425,10 +472,11 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('   ⚠️ WARNING: UTC timestamp does not end with Z!');
       }
 
-      // Use SMOOTHED coordinates in the entry (this is the key change!)
+      // TEST FIX: Send RAW coordinates to backend (smoothed may fail validation)
+      // Keep Kalman filter active for logging/debugging but don't send smoothed coords
       final entry = <String, dynamic>{
-        'latitude': smoothedLat,
-        'longitude': smoothedLng,
+        'latitude': position.latitude,      // RAW GPS (backend expects this)
+        'longitude': position.longitude,    // RAW GPS (backend expects this)
         'accuracy': position.accuracy,
         'altitude': position.altitude,
         'speed': position.speed,
@@ -437,6 +485,15 @@ class LocationTrackingProvider extends ChangeNotifier {
         'timestamp': timestampStr,
         'response_status': _responseStatus,
       };
+      
+      // Log comparison of raw vs smoothed for debugging
+      if (kalmanResult.residualMeters > 1.0) {
+        final rawToSmoothedDist = _locationService.distanceBetween(
+          position.latitude, position.longitude,
+          smoothedLat, smoothedLng,
+        );
+        debugPrint('📍 📊 Sending RAW (backend), Kalman smoothed by ${rawToSmoothedDist.toStringAsFixed(1)}m');
+      }
       if (_activeIncidentId != null) {
         entry['incident_id'] = _activeIncidentId;
       }
@@ -444,7 +501,7 @@ class LocationTrackingProvider extends ChangeNotifier {
       debugPrint('📍 ✅ Captured: lat=${position.latitude.toStringAsFixed(6)}, '
           'lng=${position.longitude.toStringAsFixed(6)}, '
           'acc=${position.accuracy.toStringAsFixed(1)}m, '
-          'timestamp=$timestamp');
+          'timestamp=$timestampStr');
       debugPrint('📍    response_status: $_responseStatus, incident_id: $_activeIncidentId');
 
       // Try to send immediately
@@ -611,6 +668,9 @@ class LocationTrackingProvider extends ChangeNotifier {
         maxSpeedMs: ApiConstants.maxReasonableSpeedMs,
       );
       
+      debugPrint('📍 🔍 Outlier removal: $beforeSimplification → ${noOutliers.length} points '
+          '(${beforeSimplification - noOutliers.length} velocity outliers removed)');
+      
       // Step 2: Apply Douglas-Peucker path simplification
       List<Map<String, dynamic>> simplified;
       if (noOutliers.length >= 3) {
@@ -625,9 +685,17 @@ class LocationTrackingProvider extends ChangeNotifier {
       }
       
       final afterSimplification = simplified.length;
-      if (beforeSimplification != afterSimplification) {
+      final totalReduction = beforeSimplification - afterSimplification;
+      final reductionPercent = (totalReduction / beforeSimplification * 100).toStringAsFixed(1);
+      
+      if (totalReduction > 0) {
         debugPrint('📍 📐 Path simplified: $beforeSimplification → $afterSimplification points '
-            '(${beforeSimplification - afterSimplification} removed)');
+            '($totalReduction removed = $reductionPercent%)');
+        
+        // Warn if reduction is too aggressive
+        if (totalReduction / beforeSimplification > 0.5) {
+          debugPrint('📍 ⚠️ WARNING: >50% data reduction! Trails may look incomplete in MIS.');
+        }
       }
       
       // Split into chunks to avoid overwhelming the server
@@ -642,9 +710,7 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('   response_status: ${sample['response_status']}');
         debugPrint('   incident_id: ${sample['incident_id']}');
         debugPrint('   lat/lng: ${sample['latitude']}, ${sample['longitude']}');
-        if (sample['simplified'] == true) {
-          debugPrint('   📐 This point was simplified by Douglas-Peucker');
-        }
+        debugPrint('   tracking_mode: ${sample['tracking_mode']}');
         final ts = sample['timestamp'] as String?;
         if (ts != null && !ts.endsWith('Z')) {
           debugPrint('   ⚠️ WARNING: Batch timestamp does not end with Z!');

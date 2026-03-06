@@ -211,7 +211,7 @@ class PathSimplifier {
         final simplified = Map<String, dynamic>.from(closest);
         simplified['latitude'] = point.latitude;
         simplified['longitude'] = point.longitude;
-        simplified['simplified'] = true; // Mark as simplified
+        // Note: Don't add 'simplified' field - backend doesn't expect it
         result.add(simplified);
       }
     }
