@@ -52,7 +52,7 @@ class PreDispatchChecklistApiService {
           'checklist_date', checklistDate.toIso8601String().split('T').first),
     );
     formData.fields.add(MapEntry('team_members', jsonEncode(teamMembers)));
-    formData.fields.add(MapEntry('device_time', deviceTime.toIso8601String()));
+    formData.fields.add(MapEntry('device_time', deviceTime.toUtc().toIso8601String()));
 
     if (shift != null && shift.trim().isNotEmpty) {
       formData.fields.add(MapEntry('shift', shift.trim()));
