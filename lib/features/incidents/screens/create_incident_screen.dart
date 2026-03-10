@@ -927,7 +927,10 @@ class _CreateIncidentScreenState extends State<CreateIncidentScreen> {
         ),
         actions: [
           ElevatedButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(context);
+              context.go('/dashboard');
+            },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
@@ -936,7 +939,7 @@ class _CreateIncidentScreenState extends State<CreateIncidentScreen> {
               ),
               elevation: 0,
             ),
-            child: const Text('OK'),
+            child: const Text('Go to Dashboard'),
           ),
         ],
       ),

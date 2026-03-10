@@ -1,4 +1,6 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +8,7 @@ import 'package:timeago/timeago.dart' as timeago;
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/incident_provider.dart';
+import '../../../core/providers/theme_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import '../widgets/map_preview_card.dart';
 
@@ -60,96 +63,126 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
     final ip = context.watch<IncidentProvider>();
+    final isDark = context.watch<ThemeProvider>().isDarkMode;
     final user = authProvider.user;
     final bottomPad = MediaQuery.of(context).padding.bottom;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light.copyWith(
+      value: (isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark)
+          .copyWith(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
       ),
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F6F9),
-        body: RefreshIndicator(
-          onRefresh: () async {
-            HapticFeedback.mediumImpact();
-            await ip.fetchIncidents();
-            ip.filterTodayAndActive();
-            await ip.fetchStatistics();
-          },
-          color: Colors.white,
-          backgroundColor: AppColors.primary,
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              slivers: [
-                // ── Header ─────────────────────────────────
-                _buildHeader(user, ip),
+        backgroundColor:
+            isDark ? const Color(0xFF020617) : AppColors.background,
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: isDark
+              ? BoxDecoration(
+                  color: Color.lerp(AppColors.primary, Colors.black, 0.8)!,
+                  image: const DecorationImage(
+                    image: AssetImage('assets/images/pdrrmosplash.png'),
+                    fit: BoxFit.cover,
+                    opacity: 0.35,
+                  ),
+                )
+              : BoxDecoration(color: AppColors.background),
+          child: isDark
+              ? BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    color: Colors.black.withOpacity(0.4),
+                    child:
+                        _buildBodyContent(context, user, ip, bottomPad, isDark),
+                  ),
+                )
+              : _buildBodyContent(context, user, ip, bottomPad, isDark),
+        ),
+      ),
+    );
+  }
 
-                // ── Content ────────────────────────────────
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.only(bottom: 96 + bottomPad),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 20),
+  Widget _buildBodyContent(BuildContext context, dynamic user,
+      IncidentProvider ip, double bottomPad, bool isDark) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        HapticFeedback.mediumImpact();
+        await ip.fetchIncidents();
+        ip.filterTodayAndActive();
+        await ip.fetchStatistics();
+      },
+      color: isDark ? AppColors.secondary : AppColors.primary,
+      backgroundColor: isDark ? AppColors.primaryDark : Colors.white,
+      child: FadeTransition(
+        opacity: _fadeAnimation,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          slivers: [
+            // ── Header ─────────────────────────────────
+            _buildHeader(user, ip, isDark),
 
-                        // Stats row
-                        _buildStatsRow(ip),
+            // ── Content ────────────────────────────────
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 96 + bottomPad),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 20),
 
-                        const SizedBox(height: 28),
+                    // Stats row
+                    _buildStatsRow(ip, isDark),
 
-                        // Quick actions
-                        _buildQuickActions(context),
+                    const SizedBox(height: 28),
 
-                        const SizedBox(height: 20),
+                    // Quick actions
+                    _buildQuickActions(context, isDark),
 
-                        // Map preview (full width)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: MapPreviewCard(
-                            incidents: ip.incidents,
-                            onTap: () => context.push('/map'),
-                          ),
-                        ),
+                    const SizedBox(height: 20),
 
-                        // Error banner
-                        if (ip.errorMessage != null) ...[
-                          const SizedBox(height: 20),
-                          _buildErrorBanner(ip),
-                        ],
+                    // Map preview (full width)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: MapPreviewCard(
+                        incidents: ip.incidents,
+                        onTap: () => context.push('/map'),
+                      ),
+                    ),
 
-                        const SizedBox(height: 28),
+                    // Error banner
+                    if (ip.errorMessage != null) ...[
+                      const SizedBox(height: 20),
+                      _buildErrorBanner(ip),
+                    ],
 
-                        // Recent incidents
-                        _buildRecentIncidents(context, ip),
+                    const SizedBox(height: 28),
 
-                        // Last updated
-                        if (ip.lastFetchTime != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 20),
-                            child: Center(
-                              child: Text(
-                                'Updated ${timeago.format(ip.lastFetchTime!)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey.shade400,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
+                    // Recent incidents
+                    _buildRecentIncidents(context, ip, isDark),
+
+                    // Last updated
+                    if (ip.lastFetchTime != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 20),
+                        child: Center(
+                          child: Text(
+                            'Updated ${timeago.format(ip.lastFetchTime!)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade400,
+                              letterSpacing: 0.2,
                             ),
                           ),
-                      ],
-                    ),
-                  ),
+                        ),
+                      ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -159,26 +192,42 @@ class _DashboardScreenState extends State<DashboardScreen>
   // HEADER
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildHeader(dynamic user, IncidentProvider ip) {
+  Widget _buildHeader(dynamic user, IncidentProvider ip, bool isDark) {
     return SliverAppBar(
       expandedHeight: 260,
       floating: false,
       pinned: true,
       stretch: true,
-      backgroundColor: AppColors.primary,
+      backgroundColor: isDark ? Colors.transparent : AppColors.primary,
       surfaceTintColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
         background: Container(
           decoration: BoxDecoration(
-            color: AppColors.primary,
-            image: DecorationImage(
-              image: const AssetImage('assets/images/header.jpg'),
-              fit: BoxFit.cover,
-              colorFilter: ColorFilter.mode(
-                AppColors.primary.withOpacity(0.8),
-                BlendMode.srcATop,
-              ),
-            ),
+            gradient: isDark
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.3),
+                      Colors.black.withOpacity(0.0),
+                      Colors.black.withOpacity(0.6),
+                    ],
+                  )
+                : LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppColors.primary,
+                      AppColors.primaryDark,
+                    ],
+                  ),
+            image: isDark
+                ? null
+                : const DecorationImage(
+                    image: AssetImage('assets/images/header.jpg'),
+                    fit: BoxFit.cover,
+                    opacity: 0.18,
+                  ),
           ),
           child: SafeArea(
             child: Padding(
@@ -188,36 +237,86 @@ class _DashboardScreenState extends State<DashboardScreen>
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(
-                    'Welcome back,',
+                    'WELCOME BACK,',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 11,
                       color: Colors.white.withOpacity(0.7),
-                      fontWeight: FontWeight.w400,
-                      letterSpacing: 0.3,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.0,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    user?.name ?? 'Staff',
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          (user?.name ?? 'STAFF').toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 1.0,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      StreamBuilder<DateTime>(
+                        stream: Stream.periodic(
+                            const Duration(seconds: 1), (_) => DateTime.now()),
+                        initialData: DateTime.now(),
+                        builder: (context, snapshot) {
+                          final time = snapshot.data!;
+                          final hour = time.hour > 12
+                              ? time.hour - 12
+                              : (time.hour == 0 ? 12 : time.hour);
+                          final minute = time.minute.toString().padLeft(2, '0');
+                          final second = time.second.toString().padLeft(2, '0');
+                          final period = time.hour >= 12 ? 'PM' : 'AM';
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '$hour:$minute:$second $period',
+                                style: TextStyle(
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.secondary,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                              Text(
+                                DateFormat('EEEE, MMM d, yyyy')
+                                    .format(time)
+                                    .toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white70,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   if (user != null)
                     Text(
-                      user.position != null
-                          ? '${user.position}${user.division != null ? " · ${user.division}" : ""}'
-                          : user.roleLabel,
+                      (user.position != null
+                              ? '${user.position}${user.division != null ? " · ${user.division}" : ""}'
+                              : user.roleLabel)
+                          .toUpperCase(),
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.white.withOpacity(0.6),
-                        fontWeight: FontWeight.w400,
+                        color: isDark ? AppColors.secondary : Colors.white70,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -230,15 +329,27 @@ class _DashboardScreenState extends State<DashboardScreen>
         collapseMode: CollapseMode.pin,
       ),
       title: Text(
-        user?.unit ?? 'PDRRMO Dispatch',
+        (user?.unit ?? 'PDRRMO DISPATCH').toUpperCase(),
         style: const TextStyle(
-          fontSize: 17,
-          fontWeight: FontWeight.w600,
+          fontSize: 22,
+          fontWeight: FontWeight.w900,
           color: Colors.white,
-          letterSpacing: -0.2,
+          letterSpacing: 1.5,
         ),
       ),
       actions: [
+        IconButton(
+          icon: Icon(
+            isDark ? Icons.light_mode : Icons.dark_mode,
+            color: Colors.white.withOpacity(0.85),
+            size: 22,
+          ),
+          tooltip: 'Toggle Theme',
+          onPressed: () {
+            HapticFeedback.lightImpact();
+            context.read<ThemeProvider>().toggleTheme();
+          },
+        ),
         IconButton(
           icon: Icon(
             Icons.refresh_rounded,
@@ -284,7 +395,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   // STATS ROW
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildStatsRow(IncidentProvider ip) {
+  Widget _buildStatsRow(IncidentProvider ip, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
@@ -403,8 +514,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         maxChildSize: 0.9,
         builder: (_, scrollController) => Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: Color(0xFF070B14),
             borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(top: BorderSide(color: Colors.white10)),
           ),
           child: Column(
             children: [
@@ -414,7 +526,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
+                  color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -427,7 +539,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.1),
+                        color: color.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(icon, color: color, size: 20),
@@ -442,7 +554,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF1E293B),
+                              color: Colors.white,
                             ),
                           ),
                           Text(
@@ -457,13 +569,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     IconButton(
                       icon: Icon(Icons.close_rounded,
-                          color: Colors.grey.shade400, size: 22),
+                          color: Colors.white.withOpacity(0.5), size: 22),
                       onPressed: () => Navigator.of(ctx).pop(),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: Colors.grey.shade200),
+              Divider(height: 1, color: Colors.white.withOpacity(0.1)),
               // Incident list
               Expanded(
                 child: incidents.isEmpty
@@ -472,13 +584,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.inbox_rounded,
-                                size: 48, color: Colors.grey.shade300),
+                                size: 48, color: Colors.white.withOpacity(0.2)),
                             const SizedBox(height: 8),
                             Text(
                               'No incidents',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey.shade400,
+                                color: Colors.white.withOpacity(0.5),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -494,13 +606,16 @@ class _DashboardScreenState extends State<DashboardScreen>
                           thickness: 1,
                           color: Colors.grey.shade100,
                         ),
-                        itemBuilder: (_, i) => _IncidentRow(
-                          incident: incidents[i],
-                          onTap: () {
-                            Navigator.of(ctx).pop();
-                            final id = incidents[i]['id'];
-                            if (id != null) context.push('/incidents/$id');
-                          },
+                        itemBuilder: (_, i) => Container(
+                          color: Colors.transparent,
+                          child: _IncidentRow(
+                            incident: incidents[i],
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              final id = incidents[i]['id'];
+                              if (id != null) context.push('/incidents/$id');
+                            },
+                          ),
                         ),
                       ),
               ),
@@ -515,13 +630,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   // QUICK ACTIONS
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildQuickActions(BuildContext context) {
+  Widget _buildQuickActions(BuildContext context, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _boxSectionHeader('QUICK ACTIONS', Icons.flash_on),
+          _boxSectionHeader('QUICK ACTIONS', Icons.flash_on, isDark),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -616,25 +731,28 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ═══════════════════════════════════════════════════════════
 
   // Helper for section headers
-  Widget _boxSectionHeader(String title, IconData icon) {
+  Widget _boxSectionHeader(String title, IconData icon, bool isDark) {
     return Row(
       children: [
-        Icon(icon, size: 14, color: Colors.grey.shade500),
+        Icon(icon,
+            size: 14,
+            color: isDark ? Colors.grey.shade500 : Colors.grey.shade600),
         const SizedBox(width: 6),
         Text(
           title,
           style: TextStyle(
             fontSize: 11,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
             letterSpacing: 1.2,
-            color: Colors.grey.shade500,
+            color: isDark ? Colors.white54 : Colors.black54,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildRecentIncidents(BuildContext context, IncidentProvider ip) {
+  Widget _buildRecentIncidents(
+      BuildContext context, IncidentProvider ip, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -643,9 +761,23 @@ class _DashboardScreenState extends State<DashboardScreen>
           // Content inside a bordered panel
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: isDark
+                  ? const Color(0xFF0F172A).withOpacity(0.5)
+                  : AppColors.surface,
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.15)
+                      : AppColors.border),
+              boxShadow: isDark
+                  ? []
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
             ),
             child: Column(
               children: [
@@ -654,9 +786,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    border:
-                        Border(bottom: BorderSide(color: Colors.grey.shade300)),
+                    color: isDark
+                        ? Colors.white.withOpacity(0.05)
+                        : AppColors.primary.withOpacity(0.05),
+                    border: Border(
+                        bottom: BorderSide(
+                            color: isDark
+                                ? Colors.white.withOpacity(0.15)
+                                : AppColors.border)),
                     borderRadius:
                         const BorderRadius.vertical(top: Radius.circular(3)),
                   ),
@@ -666,14 +803,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                       Row(
                         children: [
                           Icon(Icons.access_time,
-                              size: 14, color: Colors.grey.shade600),
+                              size: 14,
+                              color: isDark
+                                  ? Colors.white70
+                                  : AppColors.textSecondary),
                           const SizedBox(width: 6),
                           Text(
                             'Recent Incidents',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
-                              color: Colors.grey.shade700,
+                              color:
+                                  isDark ? Colors.white : AppColors.textPrimary,
                             ),
                           ),
                         ],
@@ -730,7 +871,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: Container(
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.grey.shade50,
+                color: Colors.white.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: const Center(
@@ -754,20 +895,20 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Column(
         children: [
           Icon(Icons.check_circle_outline_rounded,
-              size: 40, color: Colors.grey.shade300),
+              size: 40, color: Colors.white24),
           const SizedBox(height: 10),
           Text(
             'No active incidents',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.grey.shade400,
+              color: Colors.white70,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             'Pull down to refresh',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            style: TextStyle(fontSize: 12, color: Colors.white54),
           ),
         ],
       ),
@@ -798,7 +939,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             Divider(
               height: 1,
               thickness: 1,
-              color: Colors.grey.shade200,
+              color: Colors.white.withOpacity(0.1),
             ),
         ],
       ],
@@ -866,6 +1007,8 @@ class _StatTileState extends State<_StatTile>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeProvider>().isDarkMode;
+
     return AnimatedBuilder(
       animation: _pulse,
       builder: (context, child) {
@@ -875,8 +1018,17 @@ class _StatTileState extends State<_StatTile>
           child: Container(
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-              color: widget.color,
+              color: isDark ? widget.color : widget.color.withOpacity(0.9),
               borderRadius: BorderRadius.circular(4),
+              boxShadow: isDark
+                  ? []
+                  : [
+                      BoxShadow(
+                        color: widget.color.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      )
+                    ],
             ),
             child: Stack(
               children: [
@@ -962,8 +1114,10 @@ class _ActionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeProvider>().isDarkMode;
+
     return Material(
-      color: Colors.white,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(4),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -974,8 +1128,22 @@ class _ActionCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xFF0F172A).withOpacity(0.5)
+                : AppColors.surface,
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: Colors.grey.shade300),
+            border: Border.all(
+                color:
+                    isDark ? Colors.white.withOpacity(0.15) : AppColors.border),
+            boxShadow: isDark
+                ? []
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.02),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
           ),
           child: Row(
             children: [
@@ -993,7 +1161,7 @@ class _ActionCard extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Icon(icon, color: color, size: 18),
@@ -1005,10 +1173,10 @@ class _ActionCard extends StatelessWidget {
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1E293B),
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1017,14 +1185,16 @@ class _ActionCard extends StatelessWidget {
                       subtitle,
                       style: TextStyle(
                         fontSize: 11,
-                        color: Colors.grey.shade400,
-                        fontWeight: FontWeight.w400,
+                        color:
+                            isDark ? Colors.white70 : AppColors.textSecondary,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+              Icon(Icons.chevron_right,
+                  size: 18, color: isDark ? Colors.white54 : Colors.black26),
             ],
           ),
         ),
@@ -1045,6 +1215,8 @@ class _IncidentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeProvider>().isDarkMode;
+
     final type =
         (incident['incident_type'] ?? incident['type'] ?? 'Unknown').toString();
     final status = (incident['status'] ?? 'unknown').toString();
@@ -1102,10 +1274,11 @@ class _IncidentRow extends StatelessWidget {
                       Expanded(
                         child: Text(
                           _formatType(type),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1E293B),
+                            fontWeight: FontWeight.w700,
+                            color:
+                                isDark ? Colors.white : AppColors.textPrimary,
                             letterSpacing: -0.1,
                           ),
                           maxLines: 1,
@@ -1117,7 +1290,9 @@ class _IncidentRow extends StatelessWidget {
                           timeStr,
                           style: TextStyle(
                             fontSize: 10,
-                            color: Colors.grey.shade400,
+                            color: isDark
+                                ? Colors.white54
+                                : AppColors.textSecondary,
                           ),
                         ),
                     ],
@@ -1131,8 +1306,9 @@ class _IncidentRow extends StatelessWidget {
                         incNumber,
                         style: TextStyle(
                           fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.w600,
+                          color:
+                              isDark ? Colors.white70 : AppColors.textPrimary,
                           fontFamily: 'monospace',
                         ),
                       ),
@@ -1141,14 +1317,19 @@ class _IncidentRow extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: Text('·',
                               style: TextStyle(
-                                  fontSize: 10, color: Colors.grey.shade400)),
+                                  fontSize: 10,
+                                  color: isDark
+                                      ? Colors.white54
+                                      : AppColors.textHint)),
                         ),
                         Expanded(
                           child: Text(
                             location,
                             style: TextStyle(
                               fontSize: 10,
-                              color: Colors.grey.shade400,
+                              color: isDark
+                                  ? Colors.white70
+                                  : AppColors.textSecondary,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -1193,7 +1374,7 @@ class _IncidentRow extends StatelessWidget {
 
             const SizedBox(width: 4),
             Icon(Icons.chevron_right_rounded,
-                size: 18, color: Colors.grey.shade300),
+                size: 18, color: isDark ? Colors.white24 : Colors.black26),
           ],
         ),
       ),

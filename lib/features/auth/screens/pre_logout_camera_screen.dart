@@ -267,8 +267,9 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
 
               setGameState(() {
                 spinning = false;
-                unlocked =
-                    reelOne == scatter && reelTwo == scatter && reelThree == scatter;
+                unlocked = reelOne == scatter &&
+                    reelTwo == scatter &&
+                    reelThree == scatter;
                 message = unlocked
                     ? 'JACKPOT! SCATTER x3 unlocked skip.'
                     : 'No SCATTER combo. Try again.';
@@ -324,7 +325,8 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: (spinning ? Colors.cyan : Colors.black).withOpacity(0.3),
+                      color: (spinning ? Colors.cyan : Colors.black)
+                          .withOpacity(0.3),
                       blurRadius: spinning ? 14 : 6,
                       offset: const Offset(0, 4),
                     )
@@ -392,7 +394,8 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                     message,
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: unlocked ? const Color(0xFF86EFAC) : Colors.white70,
+                      color:
+                          unlocked ? const Color(0xFF86EFAC) : Colors.white70,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -513,16 +516,22 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                             icon: const Icon(Icons.camera_alt),
                             label: Text(
                               (_currentStep == 2 && _odometerPhoto != null)
-                                  ? 'Retake Photo'
-                                  : 'Take Photo',
+                                  ? 'RETAKE PHOTO'
+                                  : 'CAPTURE PHOTO',
                               style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 2.0,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.secondary,
                               foregroundColor: Colors.white,
+                              elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                    color: AppColors.secondaryDark, width: 2),
                               ),
                             ),
                           ),
@@ -536,22 +545,32 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _isCurrentStepValid()
                                 ? AppColors.primary
-                                : Colors.grey.shade300,
+                                : Colors.grey.shade200,
                             foregroundColor: _isCurrentStepValid()
                                 ? Colors.white
-                                : Colors.grey.shade600,
+                                : Colors.grey.shade500,
+                            elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(
+                                color: _isCurrentStepValid()
+                                    ? AppColors.primaryDark
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
                             ),
                           ),
                           child: Text(
                             _currentStep == 2
                                 ? (_isFinalizing
-                                    ? 'Submitting...'
-                                    : 'Submit & Logout')
-                                : 'Next Step',
+                                    ? 'SUBMITTING...'
+                                    : 'SUBMIT & LOGOUT')
+                                : 'NEXT STEP',
                             style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2.0,
+                            ),
                           ),
                         ),
                       ),
@@ -857,13 +876,39 @@ class _PreLogoutCameraScreenState extends State<PreLogoutCameraScreen> {
   }
 
   Widget _buildEmptyState(String text) {
-    return Center(
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.secondary.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppColors.secondary.withOpacity(0.3),
+          width: 2,
+        ),
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.photo_camera_back_outlined,
-              size: 64, color: Colors.grey.shade300),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.secondary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.add_a_photo_outlined,
+                size: 48, color: AppColors.secondary),
+          ),
           const SizedBox(height: 16),
+          Text(
+            'AWAITING IMAGES',
+            style: TextStyle(
+              color: AppColors.secondaryDark,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 6),
           Text(
             text,
             textAlign: TextAlign.center,

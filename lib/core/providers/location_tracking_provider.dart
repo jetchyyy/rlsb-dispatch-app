@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -44,7 +45,7 @@ class LocationTrackingProvider extends ChangeNotifier {
   final LocationService _locationService;
   final Box<String> _offlineBox;
   final SensorFusionService _sensorFusion;
-  
+
   /// Kalman filter for GPS position smoothing.
   final KalmanFilter2D _kalmanFilter = KalmanFilter2D(
     processNoise: ApiConstants.kalmanProcessNoise,
@@ -72,6 +73,42 @@ class LocationTrackingProvider extends ChangeNotifier {
         _offlineBox = offlineBox,
         _sensorFusion = sensorFusionService {
     _restoreState();
+    _subscribeToBackgroundUpdates();
+  }
+
+  // ── Background-to-main bridge ──────────────────────────────
+
+  /// Listens for `locationUpdate` events emitted by the background service
+  /// isolate so that [lastPosition] stays fresh even when the app is closed
+  /// and GPS captures happen in the background service.
+  void _subscribeToBackgroundUpdates() {
+    _bgLocationSub =
+        FlutterBackgroundService().on('locationUpdate').listen((event) {
+      if (event == null) return;
+      try {
+        final ts = DateTime.tryParse(event['timestamp'] as String? ?? '') ??
+            DateTime.now();
+        _lastPosition = Position(
+          latitude: (event['latitude'] as num).toDouble(),
+          longitude: (event['longitude'] as num).toDouble(),
+          accuracy: (event['accuracy'] as num? ?? 0).toDouble(),
+          altitude: (event['altitude'] as num? ?? 0).toDouble(),
+          altitudeAccuracy: 0,
+          speed: (event['speed'] as num? ?? 0).toDouble(),
+          speedAccuracy: 0,
+          heading: (event['heading'] as num? ?? 0).toDouble(),
+          headingAccuracy: 0,
+          timestamp: ts,
+        );
+        _lastCaptureTime = ts;
+        debugPrint(
+            '📍 [Provider] Updated lastPosition from background service');
+        notifyListeners();
+      } catch (e) {
+        debugPrint(
+            '📍 [Provider] Failed to parse background locationUpdate: $e');
+      }
+    });
   }
 
   // ── Callbacks ──────────────────────────────────────────────
@@ -100,6 +137,9 @@ class LocationTrackingProvider extends ChangeNotifier {
   /// Flag to prevent concurrent batch sends
   bool _isSendingBatch = false;
 
+  /// Subscription to position updates broadcast from the background service isolate.
+  StreamSubscription? _bgLocationSub;
+
   /// Timer that fires to capture a GPS fix.
   /// Timer for periodic active/passive updates
   Timer? _captureTimer;
@@ -123,17 +163,18 @@ class LocationTrackingProvider extends ChangeNotifier {
   set responseStatus(String value) {
     final statusChanged = _responseStatus != value;
     debugPrint('📍 LocationTracking: responseStatus setter called');
-    debugPrint('📍   Old: $_responseStatus, New: $value, Changed: $statusChanged');
+    debugPrint(
+        '📍   Old: $_responseStatus, New: $value, Changed: $statusChanged');
     _responseStatus = value;
     debugPrint('📍   Response status updated to: $value');
-    
+
     // Reset capture filters on status change to ensure next capture happens
     // This avoids forcing an immediate capture that might use stale GPS data
     if (statusChanged && _isTracking) {
       debugPrint('📍 🔄 Status changed — resetting filters for next capture');
       debugPrint('📍   Last captured: $_lastCapturedStatus, Current: $value');
       _lastCaptureTime = null; // Next capture will bypass time filter
-      _lastPosition = null;    // Next capture will bypass distance filter
+      _lastPosition = null; // Next capture will bypass distance filter
     }
   }
 
@@ -145,7 +186,7 @@ class LocationTrackingProvider extends ChangeNotifier {
       _locationService.getPositionStream(distanceFilter: 2);
 
   /// Begin passive tracking (every 5 minutes). Call after login.
-  /// 
+  ///
   /// **Important:** This will clear `_activeIncidentId`. If you need to
   /// preserve an active incident context, call [startActiveTracking] instead.
   Future<void> startPassiveTracking() async {
@@ -155,7 +196,8 @@ class LocationTrackingProvider extends ChangeNotifier {
     if (_activeIncidentId != null) {
       debugPrint(
           '📍 ⚠️ startPassiveTracking() blocked — active incident #$_activeIncidentId in progress');
-      debugPrint('   Call startActiveTracking() or stopActiveTracking() instead');
+      debugPrint(
+          '   Call startActiveTracking() or stopActiveTracking() instead');
       return;
     }
 
@@ -187,6 +229,17 @@ class LocationTrackingProvider extends ChangeNotifier {
     // Persist state
     _saveState();
 
+    // Start background service for passive tracking so it survives app close
+    try {
+      await BackgroundServiceInitializer.startService();
+      BackgroundServiceInitializer.setTrackingMode('passive');
+      // Pause BG capture — main isolate handles GPS while app is open
+      BackgroundServiceInitializer.pauseCapture();
+      debugPrint('📍 ✅ Background service started for passive tracking');
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to start background service: $e');
+    }
+
     // Capture an initial fix immediately
     _capturePosition();
 
@@ -214,12 +267,16 @@ class LocationTrackingProvider extends ChangeNotifier {
     // This prevents the OS from killing the app when backgrounded
     try {
       await BackgroundServiceInitializer.startService();
-      BackgroundServiceInitializer.setTrackingMode('active', incidentId: incidentId);
+      BackgroundServiceInitializer.setTrackingMode('active',
+          incidentId: incidentId);
+      // Pause BG capture — main isolate handles GPS while app is open
+      BackgroundServiceInitializer.pauseCapture();
       BackgroundServiceInitializer.updateNotification(
         'Emergency Response Active',
         'Tracking location for incident #$incidentId',
       );
-      debugPrint('📍 ✅ Background foreground service activated for incident #$incidentId');
+      debugPrint(
+          '📍 ✅ Background foreground service activated for incident #$incidentId');
     } catch (e) {
       debugPrint('📍 ⚠️ Failed to start background service: $e');
     }
@@ -320,6 +377,8 @@ class LocationTrackingProvider extends ChangeNotifier {
     _captureTimer = null;
     _flushTimer?.cancel();
     _flushTimer = null;
+    _bgLocationSub?.cancel();
+    _bgLocationSub = null;
     _mode = TrackingMode.off;
     _isTracking = false;
     _activeIncidentId = null;
@@ -329,6 +388,15 @@ class LocationTrackingProvider extends ChangeNotifier {
     _kalmanFilter.reset();
     debugPrint('📍 🔧 Kalman filter reset, sensor fusion stopped');
 
+    // Stop background service GPS capture too
+    try {
+      BackgroundServiceInitializer.setTrackingMode('off');
+      BackgroundServiceInitializer.stopService();
+      debugPrint('📍 Background service stopped on logout');
+    } catch (e) {
+      debugPrint('📍 ⚠️ Failed to stop background service: $e');
+    }
+
     // Clear persisted state on logout
     _clearState();
 
@@ -336,6 +404,22 @@ class LocationTrackingProvider extends ChangeNotifier {
     _persistBufferToHive();
 
     notifyListeners();
+  }
+
+  /// Call this when the app enters the foreground.
+  /// Pauses the background service's GPS timer to prevent double-pinging.
+  void notifyAppForegrounded() {
+    if (_mode == TrackingMode.off) return;
+    BackgroundServiceInitializer.pauseCapture();
+    debugPrint('📍 App foregrounded — background GPS capture paused');
+  }
+
+  /// Call this when the app moves to the background or is swiped away.
+  /// Resumes the background service's GPS timer to keep tracking alive.
+  void notifyAppBackgrounded() {
+    if (_mode == TrackingMode.off) return;
+    BackgroundServiceInitializer.resumeCapture();
+    debugPrint('📍 App backgrounded — background GPS capture resumed');
   }
 
   // ── Private — Capture ──────────────────────────────────────
@@ -372,19 +456,20 @@ class LocationTrackingProvider extends ChangeNotifier {
       // Reject GPS glitches BEFORE attempting to smooth them
       // This prevents Kalman filter from averaging bad data into output
       if (_lastPosition != null && _lastCaptureTime != null) {
-        final timeDelta = DateTime.now().difference(_lastCaptureTime!).inSeconds;
+        final timeDelta =
+            DateTime.now().difference(_lastCaptureTime!).inSeconds;
         final rawDistance = _locationService.distanceBetween(
           _lastPosition!.latitude,
           _lastPosition!.longitude,
-          smoothedLat,
-          smoothedLng,
+          position.latitude,
+          position.longitude,
         );
-        
+
         // Reject if moved > 500m in < 10 seconds (unrealistic for ground vehicles)
         if (timeDelta < 10 && rawDistance > 500) {
           debugPrint(
               '📍 ❌ GPS glitch detected: ${rawDistance.toStringAsFixed(0)}m in ${timeDelta}s is impossible — SKIPPING');
-          return;  // Don't even try to smooth this
+          return; // Don't even try to smooth this
         }
       }
 
@@ -392,20 +477,22 @@ class LocationTrackingProvider extends ChangeNotifier {
       // Get sensor fusion displacement estimate (if available)
       double? sensorDisplacementLat;
       double? sensorDisplacementLng;
-      
+
       if (_sensorFusion.isRunning && _lastPosition != null) {
-        final displacement = _sensorFusion.getDisplacementDegrees(_lastPosition!.latitude);
+        final displacement =
+            _sensorFusion.getDisplacementDegrees(_lastPosition!.latitude);
         sensorDisplacementLat = displacement.latDelta;
         sensorDisplacementLng = displacement.lngDelta;
-        
+
         if (_sensorFusion.totalDisplacement > 0.1) {
-          debugPrint('📍 🔧 Sensor fusion: ${_sensorFusion.totalDisplacement.toStringAsFixed(1)}m displacement estimated');
+          debugPrint(
+              '📍 🔧 Sensor fusion: ${_sensorFusion.totalDisplacement.toStringAsFixed(1)}m displacement estimated');
         }
-        
+
         // Reset sensor fusion displacement after using it
         _sensorFusion.resetDisplacement();
       }
-      
+
       // Apply Kalman filter to smooth the GPS position
       final timestamp = DateTime.now();
       final kalmanResult = _kalmanFilter.update(
@@ -416,20 +503,23 @@ class LocationTrackingProvider extends ChangeNotifier {
         sensorDisplacementLat: sensorDisplacementLat,
         sensorDisplacementLng: sensorDisplacementLng,
       );
-      
+
       // Log Kalman filter results
       final rawLat = position.latitude;
       final rawLng = position.longitude;
       final smoothedLat = kalmanResult.smoothedLatitude;
       final smoothedLng = kalmanResult.smoothedLongitude;
-      
+
       if (kalmanResult.wasOutlier) {
-        debugPrint('📍 🔧 Kalman OUTLIER detected: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m, confidence=${(kalmanResult.confidence * 100).toStringAsFixed(0)}%');
-        debugPrint('📍    Raw: ($rawLat, $rawLng) → Smoothed: ($smoothedLat, $smoothedLng)');
+        debugPrint(
+            '📍 🔧 Kalman OUTLIER detected: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m, confidence=${(kalmanResult.confidence * 100).toStringAsFixed(0)}%');
+        debugPrint(
+            '📍    Raw: ($rawLat, $rawLng) → Smoothed: ($smoothedLat, $smoothedLng)');
       } else if (kalmanResult.residualMeters > 5) {
-        debugPrint('📍 🔧 Kalman smoothed: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m');
+        debugPrint(
+            '📍 🔧 Kalman smoothed: residual=${kalmanResult.residualMeters.toStringAsFixed(1)}m');
       }
-      
+
       // ── Jitter Filter ─────────────────────────────────────────
       // Skip if barely moved (using smoothed position)
       if (_lastPosition != null && _lastCaptureTime != null) {
@@ -440,9 +530,9 @@ class LocationTrackingProvider extends ChangeNotifier {
           smoothedLat,
           smoothedLng,
         );
-        
+
         // Skip only if BOTH time < threshold AND distance < threshold (jitter scenario)
-        if (timeDelta < ApiConstants.minTimeDeltaSeconds && 
+        if (timeDelta < ApiConstants.minTimeDeltaSeconds &&
             distance < ApiConstants.minDistanceMeters) {
           debugPrint(
               '📍 ⏭️  Position skipped (jitter filter): ${timeDelta}s < ${ApiConstants.minTimeDeltaSeconds}s AND ${distance.toStringAsFixed(1)}m < ${ApiConstants.minDistanceMeters}m');
@@ -451,7 +541,8 @@ class LocationTrackingProvider extends ChangeNotifier {
       }
 
       // Update state with smoothed position (create a mock Position for callback)
-      _lastPosition = position; // Keep raw for next iteration's distance calc baseline
+      _lastPosition =
+          position; // Keep raw for next iteration's distance calc baseline
       _lastCaptureTime = timestamp;
       _lastCapturedStatus = _responseStatus;
 
@@ -460,7 +551,7 @@ class LocationTrackingProvider extends ChangeNotifier {
 
       // Use current system time for timestamp (more reliable than GPS timestamp)
       final timestampStr = timestamp.toUtc().toIso8601String();
-      
+
       // Debug: Show both UTC and local time for comparison
       final localTime = DateTime.now().toIso8601String();
       final utcTime = timestampStr;
@@ -475,8 +566,8 @@ class LocationTrackingProvider extends ChangeNotifier {
       // TEST FIX: Send RAW coordinates to backend (smoothed may fail validation)
       // Keep Kalman filter active for logging/debugging but don't send smoothed coords
       final entry = <String, dynamic>{
-        'latitude': position.latitude,      // RAW GPS (backend expects this)
-        'longitude': position.longitude,    // RAW GPS (backend expects this)
+        'latitude': position.latitude, // RAW GPS (backend expects this)
+        'longitude': position.longitude, // RAW GPS (backend expects this)
         'accuracy': position.accuracy,
         'altitude': position.altitude,
         'speed': position.speed,
@@ -485,14 +576,17 @@ class LocationTrackingProvider extends ChangeNotifier {
         'timestamp': timestampStr,
         'response_status': _responseStatus,
       };
-      
+
       // Log comparison of raw vs smoothed for debugging
       if (kalmanResult.residualMeters > 1.0) {
         final rawToSmoothedDist = _locationService.distanceBetween(
-          position.latitude, position.longitude,
-          smoothedLat, smoothedLng,
+          position.latitude,
+          position.longitude,
+          smoothedLat,
+          smoothedLng,
         );
-        debugPrint('📍 📊 Sending RAW (backend), Kalman smoothed by ${rawToSmoothedDist.toStringAsFixed(1)}m');
+        debugPrint(
+            '📍 📊 Sending RAW (backend), Kalman smoothed by ${rawToSmoothedDist.toStringAsFixed(1)}m');
       }
       if (_activeIncidentId != null) {
         entry['incident_id'] = _activeIncidentId;
@@ -502,7 +596,8 @@ class LocationTrackingProvider extends ChangeNotifier {
           'lng=${position.longitude.toStringAsFixed(6)}, '
           'acc=${position.accuracy.toStringAsFixed(1)}m, '
           'timestamp=$timestampStr');
-      debugPrint('📍    response_status: $_responseStatus, incident_id: $_activeIncidentId');
+      debugPrint(
+          '📍    response_status: $_responseStatus, incident_id: $_activeIncidentId');
 
       // Try to send immediately
       try {
@@ -514,7 +609,9 @@ class LocationTrackingProvider extends ChangeNotifier {
 
         // Smart Sync: If upload succeeds, it means we have internet.
         // Flush any offline items immediately.
-        if (_offlineBox.isNotEmpty) {
+        final hasBgPending =
+            await BackgroundServiceInitializer.hasFailedLocationQueue();
+        if (_offlineBox.isNotEmpty || hasBgPending) {
           debugPrint('📍 Online detected — flushing offline queue...');
           flushBatch();
         }
@@ -524,7 +621,8 @@ class LocationTrackingProvider extends ChangeNotifier {
         // Save to offline queue for retry
         final jsonEntry = jsonEncode(entry);
         _offlineBox.add(jsonEntry);
-        debugPrint('📍 💾 Stored in offline queue: ${jsonEntry.substring(0, 100)}...');
+        debugPrint(
+            '📍 💾 Stored in offline queue: ${jsonEntry.substring(0, 100)}...');
         debugPrint('   Queue size: ${_offlineBox.length} entries');
         notifyListeners(); // Update UI count
       } catch (e) {
@@ -536,7 +634,8 @@ class LocationTrackingProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('📍 ⚠️ GPS capture failed: $e');
-      debugPrint('   This may indicate GPS signal issues or permission problems');
+      debugPrint(
+          '   This may indicate GPS signal issues or permission problems');
     }
   }
 
@@ -544,10 +643,11 @@ class LocationTrackingProvider extends ChangeNotifier {
 
   /// Deduplicate offline queue entries by timestamp.
   /// Normalizes timestamps to second precision to catch millisecond duplicates.
-  List<Map<String, dynamic>> _deduplicateEntries(List<Map<String, dynamic>> entries) {
+  List<Map<String, dynamic>> _deduplicateEntries(
+      List<Map<String, dynamic>> entries) {
     final seen = <String>{};
     final deduplicated = <Map<String, dynamic>>[];
-    
+
     for (final entry in entries) {
       final timestamp = entry['timestamp'] as String?;
       if (timestamp == null) {
@@ -555,25 +655,26 @@ class LocationTrackingProvider extends ChangeNotifier {
         debugPrint('📍 ⚠️ Skipping entry without timestamp');
         continue;
       }
-      
+
       // Normalize to second precision (ignore milliseconds)
       // Timestamps are ISO8601: "2026-03-03T10:30:00.123Z" -> "2026-03-03T10:30:00"
       final normalizedTimestamp = timestamp.split('.').first;
-      
+
       if (seen.contains(normalizedTimestamp)) {
         debugPrint('📍 🔄 Skipping duplicate cached point: $timestamp');
         continue;
       }
-      
+
       seen.add(normalizedTimestamp);
       deduplicated.add(entry);
     }
-    
+
     final removed = entries.length - deduplicated.length;
     if (removed > 0) {
-      debugPrint('📍 Deduplicated: ${entries.length} → ${deduplicated.length} points ($removed duplicates removed)');
+      debugPrint(
+          '📍 Deduplicated: ${entries.length} → ${deduplicated.length} points ($removed duplicates removed)');
     }
-    
+
     return deduplicated;
   }
 
@@ -586,25 +687,54 @@ class LocationTrackingProvider extends ChangeNotifier {
     return chunks;
   }
 
+  /// Imports failed background-service payloads into the primary offline box.
+  Future<int> _importBackgroundOfflineQueue() async {
+    final imported =
+        await BackgroundServiceInitializer.drainFailedLocationQueue();
+    if (imported.isEmpty) {
+      return 0;
+    }
+
+    int count = 0;
+    for (final entry in imported) {
+      try {
+        await _offlineBox.add(jsonEncode(entry));
+        count++;
+      } catch (e) {
+        debugPrint('📍 ⚠️ Failed to import background offline entry: $e');
+      }
+    }
+
+    if (count > 0) {
+      debugPrint('📍 Imported $count background offline locations into queue');
+    }
+    return count;
+  }
+
   /// Retry sending any failed location updates from the offline queue.
   /// Uses the batch API endpoint for efficiency and handles deduplication.
   Future<void> flushBatch() async {
-    if (_offlineBox.isEmpty) return;
-    
     // Prevent concurrent batch sends
     if (_isSendingBatch) {
       debugPrint('📍 Batch send already in progress, skipping...');
       return;
     }
-    
+
     _isSendingBatch = true;
-    debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
-    
+
     try {
+      await _importBackgroundOfflineQueue();
+
+      if (_offlineBox.isEmpty) {
+        return;
+      }
+
+      debugPrint('📍 Flushing ${_offlineBox.length} offline location updates');
+
       // Collect all valid entries
       final allEntries = <Map<String, dynamic>>[];
       final indicesToDelete = <int>[];
-      
+
       for (int i = 0; i < _offlineBox.length; i++) {
         try {
           final raw = _offlineBox.getAt(i);
@@ -612,14 +742,15 @@ class LocationTrackingProvider extends ChangeNotifier {
             indicesToDelete.add(i); // Remove corrupted/null entries
             continue;
           }
-          
+
           final entry = jsonDecode(raw) as Map<String, dynamic>;
-          
+
           // Migrate old 'captured_at' to 'timestamp' for backward compatibility
-          if (entry.containsKey('captured_at') && !entry.containsKey('timestamp')) {
+          if (entry.containsKey('captured_at') &&
+              !entry.containsKey('timestamp')) {
             entry['timestamp'] = entry.remove('captured_at');
           }
-          
+
           // Skip entries with stale incident IDs (from completed incidents)
           final entryIncidentId = entry['incident_id'] as int?;
           if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
@@ -628,80 +759,96 @@ class LocationTrackingProvider extends ChangeNotifier {
             indicesToDelete.add(i);
             continue;
           }
-          
+
           allEntries.add(entry);
         } catch (e) {
           debugPrint('📍 Error parsing offline entry [index $i]: $e');
           indicesToDelete.add(i); // Remove malformed entries
         }
       }
-      
+
       // Remove invalid entries first
       for (final idx in indicesToDelete.reversed) {
         await _offlineBox.deleteAt(idx);
       }
-      
+
       if (allEntries.isEmpty) {
         debugPrint('📍 No valid entries to send after filtering');
         notifyListeners();
         return;
       }
-      
+
       // Deduplicate entries by timestamp before sending
       final deduplicated = _deduplicateEntries(allEntries);
-      
+
       if (deduplicated.isEmpty) {
         debugPrint('📍 All entries were duplicates, clearing queue');
         await _offlineBox.clear();
         notifyListeners();
         return;
       }
-      
+
       // ── Path Simplification ───────────────────────────────────
       // Apply velocity-based outlier removal and Douglas-Peucker simplification
       // This reduces data sent to server and ensures clean trails
       final beforeSimplification = deduplicated.length;
-      
+
       // Step 1: Remove velocity-based outliers (superhuman speed)
       final noOutliers = PathSimplifier.removeVelocityOutliers(
         deduplicated,
         maxSpeedMs: ApiConstants.maxReasonableSpeedMs,
       );
-      
-      debugPrint('📍 🔍 Outlier removal: $beforeSimplification → ${noOutliers.length} points '
+
+      debugPrint(
+          '📍 🔍 Outlier removal: $beforeSimplification → ${noOutliers.length} points '
           '(${beforeSimplification - noOutliers.length} velocity outliers removed)');
-      
-      // Step 2: Apply Douglas-Peucker path simplification
+
+      // Step 2: Preserve full-fidelity trails for active incidents.
+      final hasActiveTrailData = noOutliers.any((entry) {
+        final mode = entry['tracking_mode']?.toString().toLowerCase();
+        return mode == 'active' || entry['incident_id'] != null;
+      });
+
+      // Step 3: Apply Douglas-Peucker simplification only for passive trails.
       List<Map<String, dynamic>> simplified;
-      if (noOutliers.length >= 3) {
+      if (!hasActiveTrailData && noOutliers.length >= 3) {
         final points = PathSimplifier.toLatLngList(noOutliers);
         final simplifiedPoints = PathSimplifier.simplifyDouglasPeucker(
           points,
           epsilonMeters: ApiConstants.pathSimplificationEpsilon,
         );
-        simplified = PathSimplifier.toLocationMaps(simplifiedPoints, noOutliers);
+        simplified =
+            PathSimplifier.toLocationMaps(simplifiedPoints, noOutliers);
       } else {
+        if (hasActiveTrailData) {
+          debugPrint(
+              '📍 Active/incident trail detected — skipping path simplification');
+        }
         simplified = noOutliers;
       }
-      
+
       final afterSimplification = simplified.length;
       final totalReduction = beforeSimplification - afterSimplification;
-      final reductionPercent = (totalReduction / beforeSimplification * 100).toStringAsFixed(1);
-      
+      final reductionPercent =
+          (totalReduction / beforeSimplification * 100).toStringAsFixed(1);
+
       if (totalReduction > 0) {
-        debugPrint('📍 📐 Path simplified: $beforeSimplification → $afterSimplification points '
+        debugPrint(
+            '📍 📐 Path simplified: $beforeSimplification → $afterSimplification points '
             '($totalReduction removed = $reductionPercent%)');
-        
+
         // Warn if reduction is too aggressive
         if (totalReduction / beforeSimplification > 0.5) {
-          debugPrint('📍 ⚠️ WARNING: >50% data reduction! Trails may look incomplete in MIS.');
+          debugPrint(
+              '📍 ⚠️ WARNING: >50% data reduction! Trails may look incomplete in MIS.');
         }
       }
-      
+
       // Split into chunks to avoid overwhelming the server
       final chunks = _splitIntoChunks(simplified, ApiConstants.batchChunkSize);
-      debugPrint('📍 Sending ${simplified.length} locations in ${chunks.length} batch(es)');
-      
+      debugPrint(
+          '📍 Sending ${simplified.length} locations in ${chunks.length} batch(es)');
+
       // Debug: Show sample of what's being sent
       if (simplified.isNotEmpty) {
         final sample = simplified.first;
@@ -716,48 +863,50 @@ class LocationTrackingProvider extends ChangeNotifier {
           debugPrint('   ⚠️ WARNING: Batch timestamp does not end with Z!');
         }
       }
-      
+
       int totalSent = 0;
       int totalServerDuplicates = 0;
       int successfulChunks = 0;
-      
+
       for (int chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
         final chunk = chunks[chunkIndex];
-        
+
         try {
           final response = await _api.post(
             ApiConstants.locationBatchUpdate,
             data: {'locations': chunk},
           );
-          
+
           // Parse the batch response
           final batchResponse = BatchUpdateResponse.fromJson(response.data);
-          
+
           if (batchResponse.success) {
             totalSent += batchResponse.data.savedCount;
             totalServerDuplicates += batchResponse.data.duplicatesSkipped;
             successfulChunks++;
-            
+
             debugPrint('📍 ✅ Batch ${chunkIndex + 1}/${chunks.length}: '
                 '${batchResponse.data.savedCount} saved, '
                 '${batchResponse.data.duplicatesSkipped} duplicates skipped by server');
           } else {
-            debugPrint('📍 ❌ Batch ${chunkIndex + 1} failed: ${batchResponse.message}');
+            debugPrint(
+                '📍 ❌ Batch ${chunkIndex + 1} failed: ${batchResponse.message}');
             // Don't clear queue on failure, will retry next time
             break;
           }
-          
+
           // Small delay between chunks to avoid overwhelming server
           if (chunks.length > 1 && chunkIndex < chunks.length - 1) {
             await Future.delayed(const Duration(milliseconds: 500));
           }
-          
         } on DioException catch (e) {
-          debugPrint('📍 Batch upload failed (${e.response?.statusCode}): ${e.message}');
-          
+          debugPrint(
+              '📍 Batch upload failed (${e.response?.statusCode}): ${e.message}');
+
           // If it's a permanent error (e.g. 400, 422), clear the problematic chunk
           if (e.response != null &&
-              (e.response!.statusCode! >= 400 && e.response!.statusCode! < 500)) {
+              (e.response!.statusCode! >= 400 &&
+                  e.response!.statusCode! < 500)) {
             debugPrint('📍 Discarding invalid batch chunk [${chunkIndex + 1}]');
             successfulChunks++; // Count as "processed" to clear from queue
           } else {
@@ -769,25 +918,26 @@ class LocationTrackingProvider extends ChangeNotifier {
           break;
         }
       }
-      
+
       // Clear the offline queue if all chunks were processed successfully
       if (successfulChunks == chunks.length) {
         await _offlineBox.clear();
         debugPrint('📍 ✅ Batch update complete: $totalSent sent to server');
-        
+
         // Check for high duplicate rate and log warning
         final totalInBatch = totalSent + totalServerDuplicates;
         if (totalInBatch > 0) {
           final duplicateRate = totalServerDuplicates / totalInBatch;
           if (duplicateRate > 0.3) {
-            debugPrint('📍 ⚠️ WARNING: High duplicate rate (${(duplicateRate * 100).toStringAsFixed(1)}%). '
+            debugPrint(
+                '📍 ⚠️ WARNING: High duplicate rate (${(duplicateRate * 100).toStringAsFixed(1)}%). '
                 'Consider increasing MIN_TIME_DELTA or MIN_DISTANCE thresholds.');
           }
         }
       } else {
-        debugPrint('📍 ⚠️ Partial batch send: $successfulChunks/${chunks.length} chunks processed');
+        debugPrint(
+            '📍 ⚠️ Partial batch send: $successfulChunks/${chunks.length} chunks processed');
       }
-      
     } finally {
       _isSendingBatch = false;
       notifyListeners();
@@ -810,10 +960,12 @@ class LocationTrackingProvider extends ChangeNotifier {
       if (savedMode == 'active' && savedIncidentId != null) {
         _activeIncidentId = savedIncidentId;
         _mode = TrackingMode.active;
+        _isTracking = true; // tracking was in progress before app closed
         debugPrint(
             '📍 State restored: active tracking for incident #$savedIncidentId');
       } else if (savedMode == 'passive') {
         _mode = TrackingMode.passive;
+        _isTracking = true; // tracking was in progress before app closed
         debugPrint('📍 State restored: passive tracking');
       } else {
         debugPrint('📍 No saved tracking state found');

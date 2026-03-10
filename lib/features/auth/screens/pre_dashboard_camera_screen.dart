@@ -27,11 +27,32 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
 
   // Step 1 State: User Photo & Team Members
   File? _userPhoto;
-  final List<Map<String, dynamic>> _teamMembers = [
-    {'id': '1', 'name': 'Partner A', 'isSelected': false},
-    {'id': '2', 'name': 'Partner B', 'isSelected': false},
-    {'id': '3', 'name': 'Partner C', 'isSelected': false},
-  ];
+  List<Map<String, dynamic>> _teamMembers = [];
+  bool _isLoadingTeam = true;
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTeamMembers();
+  }
+
+  Future<void> _fetchTeamMembers() async {
+    try {
+      final api = await PreDispatchChecklistApiService.create();
+      final partners = await api.getAvailablePartners();
+      if (mounted) {
+        setState(() {
+          _teamMembers = partners;
+          _isLoadingTeam = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isLoadingTeam = false);
+      }
+    }
+  }
 
   // Step 2 & 3 State: Multiple Photos
   final List<File> _ambulancePhotos = [];
@@ -563,16 +584,22 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                         icon: const Icon(Icons.camera_alt),
                         label: Text(
                           (_currentStep == 0 && _userPhoto != null)
-                              ? 'Retake Photo'
-                              : 'Take Photo',
+                              ? 'RETAKE PHOTO'
+                              : 'CAPTURE PHOTO',
                           style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2.0,
+                          ),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.secondary,
                           foregroundColor: Colors.white,
+                          elevation: 0,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(16),
+                            side: BorderSide(
+                                color: AppColors.secondaryDark, width: 2),
                           ),
                         ),
                       ),
@@ -586,22 +613,32 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _isCurrentStepValid()
                               ? AppColors.primary
-                              : Colors.grey.shade300,
+                              : Colors.grey.shade200,
                           foregroundColor: _isCurrentStepValid()
                               ? Colors.white
-                              : Colors.grey.shade600,
+                              : Colors.grey.shade500,
+                          elevation: 0,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(16),
+                            side: BorderSide(
+                              color: _isCurrentStepValid()
+                                  ? AppColors.primaryDark
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
                           ),
                         ),
                         child: Text(
                           _currentStep == 2
                               ? (_isSubmitting
-                                  ? 'Submitting...'
-                                  : 'Complete Checklist')
-                              : 'Next Step',
+                                  ? 'SUBMITTING...'
+                                  : 'COMPLETE CHECKLIST')
+                              : 'NEXT STEP',
                           style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2.0,
+                          ),
                         ),
                       ),
                     ),
@@ -698,33 +735,81 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
           flex: 3,
           child: Center(
             child: Container(
-              width: 500,
-              height: 500,
+              width: 260, // Better portrait aspect ratio
+              height: 320,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.primary, width: 4),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primary.withOpacity(0.2),
-                    blurRadius: 15,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
+                color: AppColors.primary.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: _userPhoto == null
+                      ? AppColors.primary.withOpacity(0.5)
+                      : AppColors.primary,
+                  width: _userPhoto == null ? 2 : 4,
+                  strokeAlign: BorderSide.strokeAlignOutside,
+                ),
+                boxShadow: _userPhoto != null
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withOpacity(0.2),
+                          blurRadius: 15,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 8),
+                        )
+                      ]
+                    : [],
               ),
               child: _userPhoto == null
-                  ? Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                  ? Stack(
+                      alignment: Alignment.center,
                       children: [
-                        Icon(Icons.person_add_alt_1,
-                            size: 50, color: Colors.grey.shade400),
-                        const SizedBox(height: 8),
-                        Text('Tap below\nto capture',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.grey.shade500, fontSize: 13)),
+                        // Decorative scanner corners
+                        Positioned(
+                          top: 16,
+                          left: 16,
+                          child: _buildScannerCorner(true, true),
+                        ),
+                        Positioned(
+                          top: 16,
+                          right: 16,
+                          child: _buildScannerCorner(true, false),
+                        ),
+                        Positioned(
+                          bottom: 16,
+                          left: 16,
+                          child: _buildScannerCorner(false, true),
+                        ),
+                        Positioned(
+                          bottom: 16,
+                          right: 16,
+                          child: _buildScannerCorner(false, false),
+                        ),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.face_retouching_natural_rounded,
+                                size: 56,
+                                color: AppColors.primary.withOpacity(0.6)),
+                            const SizedBox(height: 12),
+                            Text(
+                              'ID PHOTO REQUIRED',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: AppColors.primary.withOpacity(0.8),
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap below to capture',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 11),
+                            ),
+                          ],
+                        ),
                       ],
                     )
                   : Image.file(
@@ -736,102 +821,331 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
             ),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         // Team Members Selection
         Expanded(
           flex: 2,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Select Active Partners:',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
+              // Header row with selected count
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Select Active Partners:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                      fontSize: 16,
+                    ),
+                  ),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _teamMembers.any((m) => m['isSelected'] == true)
+                          ? AppColors.primary
+                          : Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${_teamMembers.where((m) => m['isSelected'] == true).length} selected',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: _teamMembers.any((m) => m['isSelected'] == true)
+                            ? Colors.white
+                            : Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // ── Search Bar ──
+              TextField(
+                onChanged: (val) => setState(() => _searchQuery = val),
+                decoration: InputDecoration(
+                  hintText: 'Search partners...',
+                  prefixIcon: Icon(Icons.search, color: AppColors.primary),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        const BorderSide(color: AppColors.primary, width: 2),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _teamMembers.length,
-                  itemBuilder: (context, index) {
-                    final member = _teamMembers[index];
-                    final isSelected = member['isSelected'];
-                    return GestureDetector(
-                      onTap: () => _toggleMemberSelection(index),
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 16),
-                        child: Column(
-                          children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeOutBack,
-                              width: isSelected ? 86 : 76,
-                              height: isSelected ? 86 : 76,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : Colors.grey.shade300,
-                                  width: isSelected ? 4 : 2,
-                                ),
-                                boxShadow: isSelected
-                                    ? [
-                                        BoxShadow(
-                                          color: AppColors.primary
-                                              .withOpacity(0.4),
-                                          blurRadius: 12,
-                                          spreadRadius: 2,
-                                          offset: const Offset(0, 4),
-                                        )
-                                      ]
-                                    : null,
-                              ),
-                              child: ClipOval(
-                                child: ColorFiltered(
-                                  colorFilter: isSelected
-                                      ? const ColorFilter.mode(
-                                          Colors.transparent,
-                                          BlendMode.multiply,
-                                        )
-                                      : const ColorFilter.mode(
-                                          Colors.grey,
-                                          BlendMode.saturation,
-                                        ),
-                                  child: Image.asset(
-                                    'assets/images/hero1.png', // Temporary placeholder
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
+                child: _isLoadingTeam
+                    ? const Center(child: CircularProgressIndicator())
+                    : _teamMembers.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No partners available.',
+                              style: TextStyle(color: Colors.grey.shade600),
                             ),
-                            const SizedBox(height: 10),
-                            Text(
-                              member['name'],
-                              style: TextStyle(
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.textSecondary,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                          )
+                        : _buildGroupedMemberGrid(),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  // ── Grouped + Grid team member selector ──
+  Widget _buildGroupedMemberGrid() {
+    // 1. Filter the entire list based on search query
+    final filteredMembers = _searchQuery.isEmpty
+        ? _teamMembers
+        : _teamMembers.where((m) {
+            final name = (m['name'] as String? ?? '').toLowerCase();
+            final pos = (m['position'] as String? ?? '').toLowerCase();
+            final unit = (m['unit'] as String? ?? '').toLowerCase();
+            final search = _searchQuery.toLowerCase();
+            return name.contains(search) ||
+                pos.contains(search) ||
+                unit.contains(search);
+          }).toList();
+
+    // 2. Build a sorted map of unit → list of (globalIndex, member)
+    final Map<String, List<MapEntry<int, Map<String, dynamic>>>> grouped = {};
+    for (int i = 0; i < filteredMembers.length; i++) {
+      final member = filteredMembers[i];
+      // Note: we still need the original global index for `_toggleMemberSelection`
+      final globalIndex = _teamMembers.indexOf(member);
+
+      final unit = (member['unit'] as String? ?? '').trim();
+      final key = unit.isEmpty ? 'No Unit' : unit;
+      grouped.putIfAbsent(key, () => []).add(MapEntry(globalIndex, member));
+    }
+    final sortedUnits = grouped.keys.toList()
+      ..sort((a, b) {
+        // Prioritize ASSERT units to the top
+        final aIsAssert = a.toUpperCase().contains('ASSERT');
+        final bIsAssert = b.toUpperCase().contains('ASSERT');
+        if (aIsAssert && !bIsAssert) return -1;
+        if (!aIsAssert && bIsAssert) return 1;
+        // Otherwise alphabetical
+        return a.compareTo(b);
+      });
+
+    return SizedBox(
+      height: 250, // Fixed height for the horizontal scrolling row of cards
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(bottom: 8, right: 16),
+        itemCount: sortedUnits.length,
+        itemBuilder: (context, groupIndex) {
+          final unitLabel = sortedUnits[groupIndex];
+          final members = grouped[unitLabel]!;
+          final selectedInGroup =
+              members.where((e) => e.value['isSelected'] == true).length;
+
+          return Container(
+            width: 280, // Fixed width for each Unit Card
+            margin: const EdgeInsets.only(right: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade200, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Unit Card Header ──
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.05),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(15),
+                      topRight: Radius.circular(15),
+                    ),
+                    border: Border(
+                      bottom: BorderSide(color: Colors.grey.shade100),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.local_hospital_outlined,
+                          size: 16, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      // Unit Name
+                      Expanded(
+                        child: Text(
+                          unitLabel,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Selection Badge for this unit
+                      if (selectedInGroup > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$selectedInGroup ✓',
+                            style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        )
+                      else
+                        Text(
+                          '${members.length}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // ── Unit Card Body (Scrollable Members List) ──
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    itemCount: members.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, idx) {
+                      final globalIndex = members[idx].key;
+                      final member = members[idx].value;
+                      return _buildMemberRow(globalIndex, member);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildMemberRow(int globalIndex, Map<String, dynamic> member) {
+    final isSelected = member['isSelected'] as bool? ?? false;
+    final String name = member['name'] as String? ?? '';
+    final String position = member['position'] as String? ?? '';
+
+    // First-name initial for the avatar badge
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+
+    return GestureDetector(
+      onTap: () => _toggleMemberSelection(globalIndex),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color:
+              isSelected ? AppColors.primary.withOpacity(0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : Colors.grey.shade200,
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Avatar initial circle
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? AppColors.primary : Colors.grey.shade100,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                initial,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? Colors.white : Colors.grey.shade500,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Name + position
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w600,
+                      color: isSelected
+                          ? AppColors.primary
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                  if (position.isNotEmpty)
+                    Text(
+                      position,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            // Tick
+            Icon(
+              isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
+              size: 20,
+              color: isSelected ? AppColors.primary : Colors.grey.shade300,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -860,16 +1174,42 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
         const SizedBox(height: 12),
         Expanded(
           child: photos.isEmpty
-              ? Center(
+              ? Container(
+                  width: double.infinity,
+                  margin:
+                      const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.secondary.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: AppColors.secondary.withOpacity(0.3),
+                      width: 2,
+                    ),
+                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.photo_library_outlined,
-                          size: 64, color: Colors.grey.shade300),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.secondary.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.add_a_photo_outlined,
+                            size: 48, color: AppColors.secondary),
+                      ),
                       const SizedBox(height: 16),
                       Text(
-                        'No photos yet.\nTap below to capture.',
-                        textAlign: TextAlign.center,
+                        'AWAITING IMAGES',
+                        style: TextStyle(
+                          color: AppColors.secondaryDark,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Tap "CAPTURE PHOTO" to begin',
                         style: TextStyle(color: Colors.grey.shade500),
                       ),
                     ],
@@ -926,6 +1266,30 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                 ),
         ),
       ],
+    );
+  }
+
+  // Helper for technical ID photo corners
+  Widget _buildScannerCorner(bool isTop, bool isLeft) {
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        border: Border(
+          top: isTop
+              ? BorderSide(color: AppColors.primary.withOpacity(0.5), width: 3)
+              : BorderSide.none,
+          bottom: !isTop
+              ? BorderSide(color: AppColors.primary.withOpacity(0.5), width: 3)
+              : BorderSide.none,
+          left: isLeft
+              ? BorderSide(color: AppColors.primary.withOpacity(0.5), width: 3)
+              : BorderSide.none,
+          right: !isLeft
+              ? BorderSide(color: AppColors.primary.withOpacity(0.5), width: 3)
+              : BorderSide.none,
+        ),
+      ),
     );
   }
 }
