@@ -9,17 +9,25 @@ class PendingEStreetForm {
   final int incidentId;
   final EStreetFormModel form;
   final String recordedAt;
+  
+  // GPS coordinates at moment of form submission (for accurate resolved marker)
+  final double? latitude;
+  final double? longitude;
 
   PendingEStreetForm({
     required this.incidentId,
     required this.form,
     required this.recordedAt,
+    this.latitude,
+    this.longitude,
   });
 
   Map<String, dynamic> toJson() => {
         'incidentId': incidentId,
         'form': form.toJson(),
         'recordedAt': recordedAt,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
       };
 
   factory PendingEStreetForm.fromJson(Map<String, dynamic> json) =>
@@ -27,6 +35,8 @@ class PendingEStreetForm {
         incidentId: json['incidentId'] as int,
         form: EStreetFormModel.fromJson(json['form'] as Map<String, dynamic>),
         recordedAt: json['recordedAt'] as String,
+        latitude: json['latitude'] as double?,
+        longitude: json['longitude'] as double?,
       );
 }
 

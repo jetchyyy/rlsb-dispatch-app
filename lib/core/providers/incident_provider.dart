@@ -348,8 +348,13 @@ class IncidentProvider extends ChangeNotifier {
 
       // Once synced, auto-resolve the incident as per normal flow.
       // resolveIncident will call fetchIncident which refreshes _currentIncident
-      await resolveIncident(pending.incidentId,
-          notes: 'Auto-resolved after background offline E-Street form sync');
+      // Pass the original GPS coordinates from when the form was submitted
+      await resolveIncident(
+        pending.incidentId,
+        notes: 'Auto-resolved after background offline E-Street form sync',
+        latitude: pending.latitude,
+        longitude: pending.longitude,
+      );
 
       // After resolving, ensure the PDF URL is set in the current incident.
       // This handles the case where the server's incident detail endpoint doesn't
@@ -452,10 +457,23 @@ class IncidentProvider extends ChangeNotifier {
 
   /// Enqueue an E-Street form to be submitted later when offline
   Future<void> enqueueEStreetForm(int incidentId, EStreetFormModel form) async {
+    // Capture GPS at submission moment for accurate resolved marker placement
+    final lastPos = _locationProvider?.lastPosition;
+    final lat = lastPos?.latitude;
+    final lng = lastPos?.longitude;
+    
+    if (lat != null && lng != null) {
+      debugPrint('📍 Captured GPS for offline E-Street form: ($lat, $lng)');
+    } else {
+      debugPrint('⚠️ No GPS coordinates available for offline E-Street form');
+    }
+    
     await _estreetQueue.enqueue(PendingEStreetForm(
       incidentId: incidentId,
       form: form,
       recordedAt: DateTime.now().toUtc().toIso8601String(),
+      latitude: lat,
+      longitude: lng,
     ));
     debugPrint('📝 E-Street form queued offline for incident #$incidentId');
 
@@ -1069,9 +1087,10 @@ class IncidentProvider extends ChangeNotifier {
         id, 'on_scene', ApiConstants.incidentOnScene(id), notes);
   }
 
-  Future<bool> resolveIncident(int id, {String? notes}) async {
+  Future<bool> resolveIncident(int id, {String? notes, double? latitude, double? longitude}) async {
     return _performAction(
-        id, 'resolved', ApiConstants.incidentResolve(id), notes);
+        id, 'resolved', ApiConstants.incidentResolve(id), notes,
+        latitude: latitude, longitude: longitude);
   }
 
   Future<bool> closeIncident(int id, {String? notes}) async {
@@ -1084,7 +1103,8 @@ class IncidentProvider extends ChangeNotifier {
   }
 
   Future<bool> _performAction(
-      int id, String action, String endpoint, String? notes) async {
+      int id, String action, String endpoint, String? notes,
+      {double? latitude, double? longitude}) async {
     final fullUrl = '${ApiConstants.baseUrl}$endpoint';
     debugPrint('🔄 Incident #$id action: $action');
     debugPrint('  📡 Full URL: POST $fullUrl');
@@ -1099,9 +1119,10 @@ class IncidentProvider extends ChangeNotifier {
 
     try {
       // ── ALWAYS capture GPS coordinates for accurate marker placement ──────
+      // Use provided coordinates if available (from offline queue), otherwise capture current
       final lastPos = _locationProvider?.lastPosition;
-      final lat = lastPos?.latitude;
-      final lng = lastPos?.longitude;
+      final lat = latitude ?? lastPos?.latitude;
+      final lng = longitude ?? lastPos?.longitude;
       final recordedAt = DateTime.now().toUtc().toIso8601String();
       
       if (lat != null && lng != null) {

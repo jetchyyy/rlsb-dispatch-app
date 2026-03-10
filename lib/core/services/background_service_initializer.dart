@@ -337,6 +337,14 @@ Future<void> _onStart(ServiceInstance service) async {
     service.setAsForegroundService();
   }
 
+  // The actual GPS capture logic stays in LocationTrackingProvider
+  // (runs in the main isolate). The background service simply keeps
+  // the process alive so the OS does not kill it.
+  //
+  // CRITICAL: This service must run as a foreground service with a persistent
+  // notification to prevent Android from killing it during incident response.
+  //
+  // Periodic heartbeat to keep the service alive and verify timer health:
   // ── Startup: begin passive tracking by default ───────────────
   // Load tracking mode from SharedPreferences (persisted by main isolate)
   final prefs = await SharedPreferences.getInstance();
@@ -365,10 +373,24 @@ Future<void> _onStart(ServiceInstance service) async {
         service.setAsForegroundService();
       }
     }
-    service.invoke('trackingStatus', {
-      'isRunning': true,
-      'mode': _trackingMode,
-    });
+    // Send heartbeat to UI so it knows the service is alive
+    service.invoke('trackingStatus', {'isRunning': true});
+    // Ask UI to verify GPS timers are still running
+    service.invoke('checkTimers');
+  });
+  
+  // Additional watchdog: Ensure the service stays alive when screen is off
+  // This prevents Android's aggressive battery optimization from killing tracking
+  Timer.periodic(const Duration(seconds: 10), (timer) async {
+    if (service is AndroidServiceInstance) {
+      final isFg = await service.isForegroundService();
+      if (isFg) {
+        // Service is alive and well, just log periodically
+        if (DateTime.now().second % 60 == 0) {
+          debugPrint('📍 ✅ Background service heartbeat - tracking active');
+        }
+      }
+    }
   });
 }
 

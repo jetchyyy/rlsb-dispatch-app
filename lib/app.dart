@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -61,6 +62,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       _registerAlarmCallback();
       _registerLocationCallbacks();
       _listenToAuthChanges();
+      _listenToBackgroundServiceHeartbeat();
     });
   }
 
@@ -241,6 +243,12 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     incidentProvider.onRespondEnded = (incidentId) {
       debugPrint(
           '📍 App: Respond ended for incident #$incidentId → reverting to passive GPS');
+      
+      // CRITICAL: Capture one final GPS point with status="resolved" BEFORE stopping tracking
+      // This ensures the MIS has a GPS trail point showing where the incident was resolved
+      debugPrint('📍 App: Capturing final GPS point with status="resolved"');
+      locationProvider.captureImmediatePoint(statusOverride: 'resolved');
+      
       locationProvider.stopActiveTracking();
       BackgroundServiceInitializer.setTrackingMode('passive');
       BackgroundServiceInitializer.updateNotification(
@@ -364,6 +372,20 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       }
 
       _wasAuthenticated = isNowAuthenticated;
+    });
+  }
+
+  /// Listen for heartbeat messages from the background service and
+  /// ensure GPS capture/flush timers are still running.
+  void _listenToBackgroundServiceHeartbeat() {
+    FlutterBackgroundService().on('checkTimers').listen((_) {
+      if (!mounted) return;
+      try {
+        final locationProvider = context.read<LocationTrackingProvider>();
+        locationProvider.ensureTimersRunning();
+      } catch (e) {
+        debugPrint('📍 ⚠️ App: Timer recovery failed: $e');
+      }
     });
   }
 

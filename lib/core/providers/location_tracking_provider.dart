@@ -13,6 +13,7 @@ import '../constants/api_constants.dart';
 import '../models/batch_update_response.dart';
 import '../network/api_client.dart';
 import '../services/background_service_initializer.dart';
+import '../services/connectivity_service.dart';
 import '../services/location_service.dart';
 import '../services/sensor_fusion_service.dart';
 import '../utils/kalman_filter.dart';
@@ -45,7 +46,8 @@ class LocationTrackingProvider extends ChangeNotifier {
   final LocationService _locationService;
   final Box<String> _offlineBox;
   final SensorFusionService _sensorFusion;
-
+  final ConnectivityService _connectivityService;
+  
   /// Kalman filter for GPS position smoothing.
   final KalmanFilter2D _kalmanFilter = KalmanFilter2D(
     processNoise: ApiConstants.kalmanProcessNoise,
@@ -68,10 +70,14 @@ class LocationTrackingProvider extends ChangeNotifier {
     required LocationService locationService,
     required Box<String> offlineBox,
     required SensorFusionService sensorFusionService,
+    ConnectivityService? connectivityService,
   })  : _api = apiClient,
         _locationService = locationService,
         _offlineBox = offlineBox,
-        _sensorFusion = sensorFusionService {
+        _sensorFusion = sensorFusionService,
+        _connectivityService = connectivityService ?? ConnectivityService.instance {
+    // Listen for connectivity restoration to flush offline queue immediately
+    _connectivityService.onConnectionRestored(_onConnectionRestored);
     _restoreState();
     _subscribeToBackgroundUpdates();
   }
@@ -157,6 +163,12 @@ class LocationTrackingProvider extends ChangeNotifier {
   String get responseStatus => _responseStatus;
   int get pendingUpdates => _offlineBox.length;
 
+  /// Whether the device currently has network connectivity.
+  bool get hasNetworkConnection => _connectivityService.hasConnection;
+
+  /// Whether there are offline entries waiting to be synced.
+  bool get isQueueing => _offlineBox.isNotEmpty;
+
   /// Update the response status included in location payloads.
   /// Resets the capture filters when status changes (e.g., en_route → on_scene)
   /// to ensure the next periodic capture will happen regardless of time/distance thresholds.
@@ -184,6 +196,47 @@ class LocationTrackingProvider extends ChangeNotifier {
   /// Uses a small distance filter (2m) for smooth movement on map.
   Stream<Position> get locationStream =>
       _locationService.getPositionStream(distanceFilter: 2);
+
+  /// Capture one immediate GPS point with optional status override.
+  /// Used to create a final GPS point with status="resolved" before stopping tracking.
+  Future<void> captureImmediatePoint({String? statusOverride}) async {
+    if (_lastPosition == null) {
+      debugPrint('📍 ⚠️ Cannot capture immediate point: no last position available');
+      return;
+    }
+    
+    final status = statusOverride ?? _responseStatus;
+    final timestampStr = DateTime.now().toUtc().toIso8601String();
+    
+    final entry = <String, dynamic>{
+      'latitude': _lastPosition!.latitude,
+      'longitude': _lastPosition!.longitude,
+      'accuracy': _lastPosition!.accuracy,
+      'altitude': _lastPosition!.altitude,
+      'speed': _lastPosition!.speed,
+      'heading': _lastPosition!.heading,
+      'tracking_mode': _mode == TrackingMode.active ? 'active' : 'passive',
+      'timestamp': timestampStr,
+      'response_status': status,
+      if (_activeIncidentId != null) 'incident_id': _activeIncidentId,
+    };
+    
+    debugPrint('📍 ✅ Capturing immediate point with status="$status"');
+    debugPrint('📍    lat=${_lastPosition!.latitude.toStringAsFixed(6)}, '
+        'lng=${_lastPosition!.longitude.toStringAsFixed(6)}');
+    
+    try {
+      await _api.post('/location/update', data: entry);
+      debugPrint('📍 Immediate point sent to /location/update');
+    } on DioException catch (e) {
+      debugPrint('📍 Upload failed (${e.response?.statusCode}): ${e.message}');
+      // Save to offline queue for retry
+      final jsonEntry = jsonEncode(entry);
+      _offlineBox.add(jsonEntry);
+      debugPrint('📍 💾 Stored immediate point in offline queue');
+      notifyListeners();
+    }
+  }
 
   /// Begin passive tracking (every 5 minutes). Call after login.
   ///
@@ -310,31 +363,14 @@ class LocationTrackingProvider extends ChangeNotifier {
     // Always clear the incident ID, even if mode changed
     _activeIncidentId = null;
 
-    // Clear offline queue entries that contain the old incident ID
-    // to prevent resolved incident pings from being sent later.
-    // This ensures clean separation between incidents.
+    // Try to flush any remaining offline data for the resolved incident.
+    // DON'T delete it — the backend needs the complete trail even after
+    // the incident is closed. The flush logic (and the fixed stale-incident
+    // check in flushBatch) will send these to the server.
     if (oldIncidentId != null && _offlineBox.isNotEmpty) {
-      final toDelete = <int>[];
-      for (int i = 0; i < _offlineBox.length; i++) {
-        try {
-          final raw = _offlineBox.getAt(i);
-          if (raw != null) {
-            final entry = jsonDecode(raw) as Map<String, dynamic>;
-            if (entry['incident_id'] == oldIncidentId) {
-              toDelete.add(i);
-            }
-          }
-        } catch (e) {
-          debugPrint('📍 Error checking offline entry: $e');
-        }
-      }
-      for (final idx in toDelete.reversed) {
-        _offlineBox.deleteAt(idx);
-      }
-      if (toDelete.isNotEmpty) {
-        debugPrint(
-            '📍 Cleared ${toDelete.length} offline pings for incident #$oldIncidentId');
-      }
+      debugPrint(
+          '📍 Incident #$oldIncidentId resolved with ${_offlineBox.length} queued entries — attempting flush');
+      flushBatch();
     }
 
     // Update background service notification to reflect passive mode
@@ -438,6 +474,38 @@ class LocationTrackingProvider extends ChangeNotifier {
         flushBatch();
       }
     });
+  }
+
+  /// Called by ConnectivityService when connection transitions offline → online.
+  /// Triggers an immediate flush of the offline queue instead of waiting
+  /// for the 60-second flush timer.
+  void _onConnectionRestored() {
+    if (_offlineBox.isNotEmpty && _isTracking) {
+      debugPrint('📍 🌐 Connection restored — flushing ${_offlineBox.length} queued locations immediately');
+      flushBatch();
+    }
+  }
+
+  /// Ensures capture and flush timers are running. Call this to recover
+  /// from situations where timers died (e.g., background service killed
+  /// by OS during network outage).
+  ///
+  /// Safe to call repeatedly — cancels and restarts timers if active.
+  void ensureTimersRunning() {
+    if (_mode == TrackingMode.off || !_isTracking) return;
+
+    final interval = _mode == TrackingMode.active
+        ? ApiConstants.activeTrackingInterval
+        : ApiConstants.passiveTrackingInterval;
+
+    final captureWasDead = _captureTimer == null || !_captureTimer!.isActive;
+    final flushWasDead = _flushTimer == null || !_flushTimer!.isActive;
+
+    if (captureWasDead || flushWasDead) {
+      debugPrint('📍 🔁 Restarting dead timers (capture: $captureWasDead, flush: $flushWasDead)');
+      if (captureWasDead) _startCaptureTimer(interval);
+      if (flushWasDead) _startFlushTimer();
+    }
   }
 
   Future<void> _capturePosition() async {
@@ -750,12 +818,16 @@ class LocationTrackingProvider extends ChangeNotifier {
               !entry.containsKey('timestamp')) {
             entry['timestamp'] = entry.remove('captured_at');
           }
-
-          // Skip entries with stale incident IDs (from completed incidents)
+          
+          // Skip entries only if we're currently tracking a DIFFERENT incident.
+          // Don't prune data from resolved incidents — backend needs the
+          // complete historical trail even after the incident is closed.
           final entryIncidentId = entry['incident_id'] as int?;
-          if (entryIncidentId != null && entryIncidentId != _activeIncidentId) {
+          if (entryIncidentId != null &&
+              _activeIncidentId != null &&
+              entryIncidentId != _activeIncidentId) {
             debugPrint(
-                '📍 Skipping stale ping for incident #$entryIncidentId (current: ${_activeIncidentId ?? "none"})');
+                '📍 Skipping stale ping for incident #$entryIncidentId (current: #$_activeIncidentId)');
             indicesToDelete.add(i);
             continue;
           }
@@ -1015,6 +1087,8 @@ class LocationTrackingProvider extends ChangeNotifier {
   @override
   void dispose() {
     _captureTimer?.cancel();
+    _flushTimer?.cancel();
+    _connectivityService.removeOnConnectionRestored(_onConnectionRestored);
     _persistBufferToHive();
     super.dispose();
   }
