@@ -13,6 +13,7 @@ import 'core/providers/injury_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
 import 'core/providers/theme_provider.dart';
 import 'core/services/background_service_initializer.dart';
+import 'core/services/connectivity_service.dart';
 import 'core/services/location_service.dart';
 import 'core/services/map_preloader.dart';
 import 'core/services/sensor_fusion_service.dart';
@@ -50,6 +51,9 @@ void main() async {
   final locationService = LocationService();
   final sensorFusionService = SensorFusionService();
 
+  // Initialize connectivity monitoring (instant network state detection)
+  await ConnectivityService.instance.initialize();
+
   final authRemoteDataSource = AuthRemoteDataSourceImpl(apiClient);
   final authRepository = AuthRepositoryImpl(
     remoteDataSource: authRemoteDataSource,
@@ -73,6 +77,7 @@ void main() async {
     locationService: locationService,
     offlineBox: locationQueueBox,
     sensorFusionService: sensorFusionService,
+    connectivityService: ConnectivityService.instance,
   );
 
   // Create incident response provider (pure state, no dependencies)

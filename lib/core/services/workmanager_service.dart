@@ -1,5 +1,10 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
+
+import '../constants/api_constants.dart';
 
 /// WorkManager service for background tasks that run even when app is killed.
 /// 
@@ -98,33 +103,82 @@ void callbackDispatcher() {
   });
 }
 
-/// Sync offline location queue to server
+/// Sync offline location queue to server.
+/// Runs in a background isolate — cannot access providers directly.
+/// Instead, checks the Hive queue and sends a notification to wake the app.
 Future<void> _syncOfflineLocations() async {
   try {
-    // Note: In a background isolate, we can't directly access the main app's
-    // LocationTrackingProvider. Instead, the provider's flushTimer handles
-    // regular sync. This task serves as a backup to trigger sync if the
-    // main app is suspended.
-    debugPrint('📍 WorkManager: Location sync task executed');
-    
-    // The actual sync happens in LocationTrackingProvider.flushBatch()
-    // which runs every 60 seconds in the main isolate.
-    // This task just ensures the app wakes up periodically.
+    await Hive.initFlutter();
+    final box = await Hive.openBox<String>(ApiConstants.locationQueueBox);
+    final queueSize = box.length;
+    debugPrint('📍 WorkManager: Location sync — queue has $queueSize entries');
+
+    if (queueSize > 0) {
+      // Send a notification to prompt the user to open the app,
+      // which will trigger the provider's flush logic.
+      final flnp = FlutterLocalNotificationsPlugin();
+      await flnp.initialize(
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        ),
+      );
+      await flnp.show(
+        9999,
+        'PDRRMO Dispatch',
+        '$queueSize location updates pending — open app to sync',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'location_sync_channel',
+            'Location Sync',
+            channelDescription: 'Alerts when offline location data needs syncing',
+            importance: Importance.defaultImportance,
+            priority: Priority.defaultPriority,
+          ),
+        ),
+      );
+      debugPrint('📍 WorkManager: Notification sent for $queueSize pending locations');
+    }
+
+    await box.close();
   } catch (e) {
     debugPrint('📍 ⚠️ Location sync failed: $e');
   }
 }
 
-/// Check if tracking should still be active based on persisted state
+/// Check if tracking should still be active based on persisted state.
+/// Alerts responder if tracking appears to have stopped unexpectedly.
 Future<void> _checkTrackingHealth() async {
   try {
-    // Check SharedPreferences for active incident tracking state
-    // If active tracking is enabled but we haven't received GPS data
-    // in a while, this could trigger a notification to the user
-    debugPrint('📍 WorkManager: Tracking health check executed');
-    
-    // Note: Actual health monitoring is done in the main isolate.
-    // This task just ensures the app stays awake during incident response.
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('loc_tracking_mode');
+    final incidentId = prefs.getInt('loc_active_incident_id');
+
+    debugPrint('📍 WorkManager: Health check — mode=$mode, incident=$incidentId');
+
+    if (mode == 'active' && incidentId != null) {
+      // Active tracking should be running — send a reminder notification
+      // in case the main app was killed and tracking stopped.
+      final flnp = FlutterLocalNotificationsPlugin();
+      await flnp.initialize(
+        const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        ),
+      );
+      await flnp.show(
+        9998,
+        'PDRRMO Dispatch — Tracking Check',
+        'Active tracking for incident #$incidentId — open app to verify',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'tracking_health_channel',
+            'Tracking Health',
+            channelDescription: 'Alerts when active tracking may have stopped',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+      );
+    }
   } catch (e) {
     debugPrint('📍 ⚠️ Health check failed: $e');
   }
