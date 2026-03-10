@@ -11,6 +11,7 @@ import 'core/providers/incident_provider.dart';
 import 'core/providers/incident_response_provider.dart';
 import 'core/providers/injury_provider.dart';
 import 'core/providers/location_tracking_provider.dart';
+import 'core/providers/theme_provider.dart';
 import 'core/services/background_service_initializer.dart';
 import 'core/services/location_service.dart';
 import 'core/services/map_preloader.dart';
@@ -63,6 +64,9 @@ void main() async {
     logoutUser: logoutUser,
   );
 
+  // Create theme provider
+  final themeProvider = ThemeProvider(prefs);
+
   // Create location tracking provider
   final locationTrackingProvider = LocationTrackingProvider(
     apiClient: apiClient,
@@ -79,7 +83,7 @@ void main() async {
 
   // Check if user is already logged in
   await authProvider.checkAuthStatus();
-  
+
   // If user is authenticated, refresh profile from backend to get latest data (including unit field)
   if (authProvider.isAuthenticated) {
     await authProvider.refreshProfile();
@@ -115,7 +119,7 @@ void main() async {
     }
 
     await BackgroundServiceInitializer.startService();
-    
+
     // Register WorkManager tasks for offline sync and health monitoring
     await WorkManagerService.registerLocationSync();
     await WorkManagerService.registerTrackingHealthCheck();
@@ -127,6 +131,9 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider.value(
+          value: themeProvider,
+        ),
         ChangeNotifierProvider.value(
           value: authProvider,
         ),

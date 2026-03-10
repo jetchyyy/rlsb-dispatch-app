@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/providers/theme_provider.dart';
 
 /// A small, interactive map preview card for the dashboard quick actions.
 /// Shows recent incident locations as markers on OpenStreetMap.
@@ -171,6 +173,7 @@ class _MapPreviewCardState extends State<MapPreviewCard>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = context.watch<ThemeProvider>().isDarkMode;
     final markers = _buildMarkers();
 
     return ScaleTransition(
@@ -216,25 +219,35 @@ class _MapPreviewCardState extends State<MapPreviewCard>
                 );
               },
               child: Material(
-                color: Colors.white,
-                child: _buildMapContent(markers),
+                color:
+                    isDark ? const Color(0xFF0F172A) : AppColors.cardBackground,
+                child: _buildMapContent(markers, isDark),
               ),
             );
           },
           child: Material(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF0F172A) : AppColors.cardBackground,
             borderRadius: BorderRadius.circular(4),
             clipBehavior: Clip.antiAlias,
             elevation: _isPressed ? 1 : 2,
-            shadowColor: Colors.black.withOpacity(0.15),
-            child: _buildMapContent(markers),
+            shadowColor: Colors.black.withOpacity(0.5),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.15)
+                        : AppColors.border),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: _buildMapContent(markers, isDark),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildMapContent(List<Marker> markers) {
+  Widget _buildMapContent(List<Marker> markers, bool isDark) {
     return SizedBox(
       height: 250,
       child: Stack(
@@ -248,7 +261,8 @@ class _MapPreviewCardState extends State<MapPreviewCard>
                   initialZoom: _defaultZoom,
                   minZoom: 8,
                   maxZoom: 12,
-                  backgroundColor: const Color(0xFFE8E8E8),
+                  backgroundColor:
+                      isDark ? const Color(0xFF0F172A) : AppColors.background,
                   // Constrain center to Surigao del Norte bounds
                   cameraConstraint: CameraConstraint.containCenter(
                     bounds: LatLngBounds(
@@ -283,14 +297,16 @@ class _MapPreviewCardState extends State<MapPreviewCard>
             child: IgnorePointer(
               child: Container(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.05),
-                      Colors.black.withValues(alpha: 0.25),
-                    ],
-                  ),
+                  gradient: isDark
+                      ? LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.05),
+                            Colors.black.withValues(alpha: 0.25),
+                          ],
+                        )
+                      : null,
                 ),
               ),
             ),

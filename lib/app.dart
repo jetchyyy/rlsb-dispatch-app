@@ -11,7 +11,6 @@ import 'core/services/workmanager_service.dart';
 import 'core/services/tts_service.dart';
 import 'core/services/geocoding_service.dart';
 import 'core/widgets/incident_alert_overlay.dart';
-import 'core/widgets/response_status_banner.dart';
 import 'features/admin/screens/dispatcher_tracker_screen.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
@@ -34,7 +33,7 @@ class App extends StatefulWidget {
   State<App> createState() => _AppState();
 }
 
-class _AppState extends State<App> {
+class _AppState extends State<App> with WidgetsBindingObserver {
   List<Map<String, dynamic>>? _pendingAlertIncidents;
 
   /// Track the last auth state so we can react to login/logout transitions.
@@ -57,6 +56,7 @@ class _AppState extends State<App> {
     _goRouter = _createRouter();
 
     // Register callbacks after the first frame so providers are ready
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerAlarmCallback();
       _registerLocationCallbacks();
@@ -66,8 +66,25 @@ class _AppState extends State<App> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _goRouter.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Skip if not mounted or context not available
+    if (!mounted) return;
+    final tracking = context.read<LocationTrackingProvider>();
+    if (state == AppLifecycleState.resumed) {
+      // App is in foreground again — main isolate takes over GPS capture
+      tracking.notifyAppForegrounded();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      // App has moved to background or been swiped away — hand off to bg service
+      tracking.notifyAppBackgrounded();
+    }
   }
 
   // ── Alarm ────────────────────────────────────────────────────
@@ -312,7 +329,7 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.startPassiveTracking();
         BackgroundServiceInitializer.startService();
-        
+
         // Register WorkManager tasks for background sync and monitoring
         WorkManagerService.registerLocationSync();
         WorkManagerService.registerTrackingHealthCheck();
@@ -336,7 +353,7 @@ class _AppState extends State<App> {
         final locationProvider = context.read<LocationTrackingProvider>();
         locationProvider.stopAllTracking();
         BackgroundServiceInitializer.stopService();
-        
+
         // Cancel all WorkManager background tasks
         WorkManagerService.cancelAll();
         debugPrint('📍 App: WorkManager tasks cancelled');
@@ -405,28 +422,7 @@ class _AppState extends State<App> {
           builder: (context, state, child) {
             return Stack(
               children: [
-                // The actual routed page — push down below the banner
-                // when actively responding to an incident.
-                Consumer<IncidentResponseProvider>(
-                  builder: (context, rp, _) {
-                    if (!rp.isRespondingToIncident || rp.isBannerHidden) {
-                      return child;
-                    }
-                    // Reserve space at the top for the response banner
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 56),
-                      child: child,
-                    );
-                  },
-                ),
-
-                // Response status banner (top, across all screens)
-                const Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: ResponseStatusBanner(),
-                ),
+                child,
 
                 // Red flash overlay when new incidents arrive
                 if (_pendingAlertIncidents != null &&

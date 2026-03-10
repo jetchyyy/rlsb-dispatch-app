@@ -52,7 +52,8 @@ class PreDispatchChecklistApiService {
           'checklist_date', checklistDate.toIso8601String().split('T').first),
     );
     formData.fields.add(MapEntry('team_members', jsonEncode(teamMembers)));
-    formData.fields.add(MapEntry('device_time', deviceTime.toUtc().toIso8601String()));
+    formData.fields
+        .add(MapEntry('device_time', deviceTime.toUtc().toIso8601String()));
 
     if (shift != null && shift.trim().isNotEmpty) {
       formData.fields.add(MapEntry('shift', shift.trim()));
@@ -91,10 +92,39 @@ class PreDispatchChecklistApiService {
       return Map<String, dynamic>.from(response.data as Map);
     } on DioException catch (e) {
       debugPrint('PreDispatch submit failed');
-      debugPrint('URL: ${_dio.options.baseUrl}${ApiConstants.preDispatchChecklistsEndpoint}');
+      debugPrint(
+          'URL: ${_dio.options.baseUrl}${ApiConstants.preDispatchChecklistsEndpoint}');
       debugPrint('Status: ${e.response?.statusCode}');
       debugPrint('Response: ${e.response?.data}');
       rethrow;
+    }
+  }
+
+  /// Fetch active team members / partners from the MIS backend
+  Future<List<Map<String, dynamic>>> getAvailablePartners() async {
+    try {
+      final response = await _dio.get(ApiConstants.teamMembersEndpoint);
+      final data = response.data;
+
+      if (data != null && data['success'] == true && data['data'] != null) {
+        final List<dynamic> users = data['data'];
+        return users.map((u) {
+          return {
+            'id': u['id'].toString(),
+            'name': u['name'] ?? 'Unknown',
+            'position': u['position'] ?? '',
+            'unit': u['unit'] ?? '',
+            'isSelected': false,
+          };
+        }).toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      debugPrint('Error fetching partners: ${e.message}');
+      return [];
+    } catch (e) {
+      debugPrint('Unexpected error fetching partners: $e');
+      return [];
     }
   }
 }

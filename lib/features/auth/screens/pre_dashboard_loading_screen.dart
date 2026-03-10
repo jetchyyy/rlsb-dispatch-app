@@ -66,114 +66,152 @@ class _PreDashboardLoadingScreenState extends State<PreDashboardLoadingScreen>
     return Scaffold(
       body: Container(
         width: double.infinity,
+        height: double.infinity,
         decoration: BoxDecoration(
-          color: AppColors.primary,
-          image: DecorationImage(
-            image: const AssetImage('assets/images/hero1.png'), // Background
+          color: Color.lerp(AppColors.primary, Colors.black, 0.7)!,
+          image: const DecorationImage(
+            image: AssetImage('assets/images/pdrrmosplash.png'),
             fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(
-              AppColors.primary.withOpacity(0.85),
-              BlendMode.darken,
-            ),
+            opacity: 0.4,
           ),
         ),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
-          child: SafeArea(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Spacer(),
-
-                // Animated Logo
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _scaleAnimation.value,
-                      child: Opacity(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            color: Colors.black.withOpacity(0.35),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40.0),
+                child: Center(
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, child) {
+                      return Opacity(
                         opacity: _opacityAnimation.value,
-                        child: Container(
-                          width: 250,
-                          height: 250,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Image.asset(
-                              'assets/images/pdrrmologo.png',
-                              fit: BoxFit
-                                  .contain, // Maintain original logo ratio
-                              width: 450,
-                              height: 450,
+                        child: Transform.scale(
+                          scale: _scaleAnimation.value,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // ── Main Logo ─────────────────────────────────
+                        Hero(
+                          tag: 'pdrrmo_logo',
+                          child: Container(
+                            width: 220,
+                            height: 220,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primary.withOpacity(0.6),
+                                  blurRadius: 40,
+                                  spreadRadius: 8,
+                                )
+                              ],
                             ),
+                            child: Image.asset('assets/images/pdrrmologo.png'),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 48),
-
-                // Animated Text & Loader
-                AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    return Opacity(
-                      opacity: _opacityAnimation.value,
-                      child: Column(
-                        children: [
-                          Text(
-                            'Preparing Your Dashboard',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.2,
-                                ),
+                        const SizedBox(height: 48),
+                        Text(
+                          'PDRRMO',
+                          style: Theme.of(context)
+                              .textTheme
+                              .displayMedium
+                              ?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 4,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.8),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Syncing dispatch data...',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color: Colors.white70,
-                                ),
-                          ),
-                          const SizedBox(height: 32),
-                          const SizedBox(
-                            width: 200,
-                            child: LinearProgressIndicator(
-                              color: Colors.white,
-                              backgroundColor: Colors.white24,
-                              minHeight: 4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-
-                const Spacer(),
-
-                // Footer
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 24.0),
-                  child: Text(
-                    'PDRRMO Response System',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white70,
-                          letterSpacing: 2.0,
                         ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'EMERGENCY DISPATCH UNIT',
+                          textAlign: TextAlign.center,
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.amberAccent.shade100,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2.5,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.8),
+                                blurRadius: 5,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 64),
+                        // ── Loading Bar ──────────────────────────────
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'SYNCING DISPATCH DATA...',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.7),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              height: 6,
+                              clipBehavior: Clip.antiAlias,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: LinearProgressIndicator(
+                                valueColor: const AlwaysStoppedAnimation<Color>(
+                                    Colors.amberAccent),
+                                backgroundColor: Colors.transparent,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'PREPARING YOUR DASHBOARD',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.amberAccent,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 48),
+                        Text(
+                          'Surigao Del Norte\nProvincial Disaster Risk Reduction and Management Office',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 1.1,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
