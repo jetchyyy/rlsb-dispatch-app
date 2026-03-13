@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -33,126 +34,265 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final ip = context.watch<IncidentProvider>();
     final incidents = ip.incidents;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              context.go('/dashboard');
-            }
-          },
-        ),
-        title: const Text('Analytics'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
-          ),
-        ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark.copyWith(
+        statusBarColor: Colors.transparent,
       ),
-      body: RefreshIndicator(
-        onRefresh: () async => _refresh(),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF4F6F9),
+        body: Column(
           children: [
-            // ── Period Selector ─────────────────────────
-            _periodSelector(),
-            const SizedBox(height: 16),
+            // ── Gradient Header ──────────────────────────
+            _buildHeader(context),
 
-            // ── Summary Small Boxes ────────────────────
-            _summaryBoxes(ip),
-            const SizedBox(height: 16),
+            // ── Content ──────────────────────────────────
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () async => _refresh(),
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // ── Period Selector ─────────────────────────
+                    _periodSelector(),
+                    const SizedBox(height: 16),
 
-            // ── Severity Distribution ────────────────────
-            _boxPanel(
-              title: 'Severity Distribution',
-              icon: Icons.pie_chart_outline,
-              child: SizedBox(
-                height: 220,
-                child: _severityPieChart(incidents),
+                    // ── Summary Small Boxes ────────────────────
+                    _summaryBoxes(ip),
+                    const SizedBox(height: 16),
+
+                    // ── Severity Distribution ────────────────────
+                    _boxPanel(
+                      title: 'SEVERITY DISTRIBUTION',
+                      icon: Icons.pie_chart_outline,
+                      child: SizedBox(
+                        height: 220,
+                        child: _severityPieChart(incidents),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Incident Types ──────────────────────────
+                    _boxPanel(
+                      title: 'INCIDENTS BY TYPE',
+                      icon: Icons.bar_chart,
+                      child: _typeBarChart(incidents),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Status Breakdown ────────────────────────
+                    _boxPanel(
+                      title: 'STATUS BREAKDOWN',
+                      icon: Icons.donut_small_outlined,
+                      child: _statusList(incidents),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Top Municipalities ──────────────────────
+                    _boxPanel(
+                      title: 'TOP MUNICIPALITIES',
+                      icon: Icons.location_city,
+                      child: _municipalityList(incidents),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-
-            // ── Incident Types ──────────────────────────
-            _boxPanel(
-              title: 'Incidents by Type',
-              icon: Icons.bar_chart,
-              child: _typeBarChart(incidents),
-            ),
-            const SizedBox(height: 12),
-
-            // ── Status Breakdown ────────────────────────
-            _boxPanel(
-              title: 'Status Breakdown',
-              icon: Icons.donut_small_outlined,
-              child: _statusList(incidents),
-            ),
-            const SizedBox(height: 12),
-
-            // ── Top Municipalities ──────────────────────
-            _boxPanel(
-              title: 'Top Municipalities',
-              icon: Icons.location_city,
-              child: _municipalityList(incidents),
-            ),
-            const SizedBox(height: 16),
           ],
         ),
       ),
     );
   }
 
-  Widget _periodSelector() {
-    return Row(
-      children: [
-        Text('Period:',
-            style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade700,
-                fontSize: 13)),
-        const SizedBox(width: 8),
-        ...['24h', '7d', '30d', '90d'].map((period) {
-          final isSelected = _selectedPeriod == period;
-          return Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: InkWell(
-              onTap: () {
-                setState(() => _selectedPeriod = period);
-                _refresh();
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primary : Colors.white,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color:
-                        isSelected ? AppColors.primary : Colors.grey.shade400,
+  // ═══════════════════════════════════════════════════════════
+  // HEADER
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildHeader(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primary,
+            AppColors.primaryDark,
+          ],
+        ),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/header.jpg'),
+          fit: BoxFit.cover,
+          opacity: 0.18,
+        ),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top row with back button and refresh
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () {
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      } else {
+                        context.go('/dashboard');
+                      }
+                    },
                   ),
-                ),
-                child: Text(
-                  period,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: isSelected ? Colors.white : Colors.grey.shade700,
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    onPressed: () {
+                      HapticFeedback.lightImpact();
+                      _refresh();
+                    },
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Title section
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'INCIDENT ANALYTICS',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withOpacity(0.7),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2.0,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text(
+                          'REPORTS & STATS',
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                        Icon(
+                          Icons.analytics_rounded,
+                          size: 32,
+                          color: AppColors.secondary,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'DATA INSIGHTS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withOpacity(0.7),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          );
-        }),
-      ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  // ── AdminLTE-style Small Boxes ────────────────────────────
+  Widget _periodSelector() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppColors.primary.withOpacity(0.08),
+            AppColors.primaryDark.withOpacity(0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: AppColors.primary.withOpacity(0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_today, size: 14, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Text('PERIOD:',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                  fontSize: 12,
+                  letterSpacing: 1.0)),
+          const SizedBox(width: 12),
+          ...['24h', '7d', '30d', '90d'].map((period) {
+            final isSelected = _selectedPeriod == period;
+            return Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: InkWell(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  setState(() => _selectedPeriod = period);
+                  _refresh();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    gradient: isSelected
+                        ? LinearGradient(colors: [
+                            AppColors.primary,
+                            AppColors.primaryDark,
+                          ])
+                        : null,
+                    color: isSelected ? null : Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppColors.primaryDark
+                          : Colors.grey.shade400,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: AppColors.primary.withOpacity(0.4),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: Text(
+                    period.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                      color: isSelected ? Colors.white : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ══ AdminLTE-style Small Boxes ═══════════════════════════
 
   Widget _summaryBoxes(IncidentProvider ip) {
     final avgResponse = ip.statistics?['average_response_time'] ?? 'N/A';
@@ -161,20 +301,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       children: [
         Row(
           children: [
-            _smallBox('Active', '${ip.activeCount}', AppColors.severityCritical,
-                Icons.notifications_active),
+            _smallBox('ACTIVE', '${ip.activeCount}',
+                const Color(0xFFEF4444), Icons.notifications_active),
             const SizedBox(width: 8),
-            _smallBox('Pending', '${ip.pendingCount}', AppColors.statusReported,
-                Icons.hourglass_top),
+            _smallBox('PENDING', '${ip.pendingCount}',
+                const Color(0xFFF97316), Icons.hourglass_top),
           ],
         ),
         const SizedBox(height: 8),
         Row(
           children: [
-            _smallBox('Dispatched', '${ip.dispatchedCount}', AppColors.primary,
-                Icons.local_shipping),
+            _smallBox('DISPATCHED', '${ip.dispatchedCount}',
+                const Color(0xFF3B82F6), Icons.local_shipping),
             const SizedBox(width: 8),
-            _smallBox('Resolved', '${ip.resolvedCount}',
+            _smallBox('RESOLVED', '${ip.resolvedCount}',
                 const Color(0xFF22C55E), Icons.check_circle_outline),
           ],
         ),
@@ -182,46 +322,59 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         // Average Response Time Box (Full Width)
         Container(
           width: double.infinity,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: Colors.white,
+            gradient: const LinearGradient(
+              colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+            ),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: Colors.grey.shade300),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF3B82F6).withOpacity(0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
           ),
-          child: Row(
+          child: Stack(
             children: [
-              Container(
-                width: 4,
-                height: 56,
-                decoration: const BoxDecoration(
-                  color: Colors.blueAccent,
-                  borderRadius:
-                      BorderRadius.horizontal(left: Radius.circular(3)),
+              // Watermark Icon
+              Positioned(
+                right: -10,
+                bottom: -10,
+                child: Icon(
+                  Icons.timer,
+                  size: 80,
+                  color: Colors.white.withOpacity(0.15),
                 ),
               ),
-              Expanded(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(avgResponse,
-                          style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blueAccent)),
-                      Text('Avg Response Time',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey.shade600,
-                              fontWeight: FontWeight.w600)),
-                    ],
-                  ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(avgResponse,
+                              style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                  height: 1)),
+                          const SizedBox(height: 4),
+                          Text('AVG RESPONSE TIME',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.5)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const Padding(
-                padding: EdgeInsets.only(right: 12),
-                child: Icon(Icons.timer, size: 24, color: Color(0x4D448AFF)),
               ),
             ],
           ),
@@ -233,46 +386,52 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget _smallBox(String label, String value, Color color, IconData icon) {
     return Expanded(
       child: Container(
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: color,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: Colors.grey.shade300),
-        ),
-        child: Row(
-          children: [
-            // Color accent bar on left
-            Container(
-              width: 4,
-              height: 56,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius:
-                    const BorderRadius.horizontal(left: Radius.circular(3)),
-              ),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(value,
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: color)),
-                    Text(label,
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Watermark Icon
+            Positioned(
+              right: -8,
+              bottom: -8,
+              child: Icon(
+                icon,
+                size: 56,
+                color: Colors.white.withOpacity(0.15),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Icon(icon, size: 24, color: color.withOpacity(0.3)),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(value,
+                      style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          height: 1)),
+                  const SizedBox(height: 4),
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white.withOpacity(0.9),
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ],
+              ),
             ),
           ],
         ),
@@ -280,7 +439,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
-  // ── AdminLTE Box Panel ────────────────────────────────────
+  // ══ AdminLTE Box Panel ═══════════════════════════════════
 
   Widget _boxPanel(
       {required String title, required IconData icon, required Widget child}) {
@@ -289,16 +448,29 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
           // Panel header
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.primary.withOpacity(0.08),
+                  AppColors.primaryDark.withOpacity(0.08),
+                ],
+              ),
+              border: Border(
+                  bottom: BorderSide(color: AppColors.primary.withOpacity(0.2))),
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(3)),
             ),
@@ -309,9 +481,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.grey.shade700,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                    letterSpacing: 1.0,
                   ),
                 ),
               ],

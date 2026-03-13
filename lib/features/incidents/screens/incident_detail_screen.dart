@@ -138,7 +138,58 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F9),
       appBar: AppBar(
-        title: Text(incident?['incident_number'] ?? 'Incident Detail'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        toolbarHeight: 72,
+        surfaceTintColor: Colors.transparent,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.primary, AppColors.primaryDark],
+            ),
+            image: DecorationImage(
+              image: AssetImage('assets/images/header.jpg'),
+              fit: BoxFit.cover,
+              opacity: 0.18,
+            ),
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        leading: context.canPop()
+            ? null // let Flutter render the default back button
+            : IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                tooltip: 'Back to Dashboard',
+                onPressed: () => context.go('/dashboard'),
+              ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'INCIDENT DETAIL',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.white.withOpacity(0.7),
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2.0,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              (incident?['incident_number'] ?? 'LOADING...').toString().toUpperCase(),
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
         actions: [
           if (incident != null &&
               ((incident['status'] ?? '').toString().toLowerCase() ==
@@ -146,38 +197,103 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                   (incident['status'] ?? '').toString().toLowerCase() ==
                       'on_scene'))
             IconButton(
-              icon: const Icon(Icons.map),
+              icon: const Icon(Icons.map, color: Colors.white),
               tooltip: 'Open live map',
               onPressed: () => context.push('/map?incidentId=${widget.incidentId}'),
             ),
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: () => ip.fetchIncident(widget.incidentId),
           ),
         ],
       ),
       body: ip.isLoading && incident == null
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: AppColors.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'LOADING INCIDENT DATA',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.0,
+                      color: AppColors.primary.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            )
           : ip.errorMessage != null && incident == null
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline,
-                          size: 56, color: AppColors.error),
-                      const SizedBox(height: 12),
-                      Text(ip.errorMessage!,
-                          style: const TextStyle(color: AppColors.error)),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: AppColors.error.withOpacity(0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.warning_amber_rounded,
+                            size: 52, color: AppColors.error),
+                      ),
                       const SizedBox(height: 16),
-                      ElevatedButton(
+                      Text(
+                        'FAILED TO LOAD',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2.0,
+                          color: AppColors.error.withOpacity(0.8),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(ip.errorMessage!,
+                          style: const TextStyle(
+                              color: AppColors.textSecondary, fontSize: 13)),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
                         onPressed: () => ip.fetchIncident(widget.incidentId),
-                        child: const Text('Retry'),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('RETRY',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.0)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 )
               : incident == null
-                  ? const Center(child: Text('Incident not found'))
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off_rounded,
+                              size: 48,
+                              color: AppColors.primary.withOpacity(0.3)),
+                          const SizedBox(height: 12),
+                          Text(
+                            'INCIDENT NOT FOUND',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2.0,
+                              color: AppColors.primary.withOpacity(0.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
                   : RefreshIndicator(
                       onRefresh: () => ip.fetchIncident(widget.incidentId),
                       child: Column(
@@ -206,9 +322,17 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.grey.shade50,
-          border:
-              Border(top: BorderSide(color: Colors.grey.shade300, width: 1)),
+          color: Colors.white,
+          border: Border(
+              top: BorderSide(
+                  color: AppColors.primary.withOpacity(0.2), width: 2)),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.06),
+              blurRadius: 10,
+              offset: const Offset(0, -3),
+            ),
+          ],
         ),
         child: SafeArea(
           child: Row(
@@ -303,18 +427,33 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       );
                     }
                   },
-                  icon: const Icon(Icons.assignment, size: 18),
-                  label: const Text('E-Street Form',
-                      style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.assignment, size: 16),
+                  label: const Text('E-STREET',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: () => _generatePdf(incident),
-                  icon: const Icon(Icons.picture_as_pdf, size: 18),
-                  label: const Text('PDF', style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.picture_as_pdf, size: 16),
+                  label: const Text('PDF',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red[700],
                     side: BorderSide(color: Colors.red[700]!),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
                   ),
                 ),
               ],
@@ -367,12 +506,14 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade300, width: 1)),
+        border: Border(
+            top: BorderSide(
+                color: AppColors.primary.withOpacity(0.2), width: 2)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: AppColors.primary.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
           ),
         ],
       ),
@@ -499,16 +640,35 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
               TextField(
                 controller: _notesController,
                 maxLines: 2,
+                style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
-                  hintText: 'Add notes (optional)...',
+                  hintText: 'Add operational notes...',
+                  hintStyle: const TextStyle(
+                      fontSize: 12, color: AppColors.textHint),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(
+                        color: AppColors.primary.withOpacity(0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: const BorderSide(
+                        color: AppColors.primary, width: 1.5),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(
+                        color: AppColors.primary.withOpacity(0.25)),
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 10,
                   ),
                   isDense: true,
+                  prefixIcon: const Icon(Icons.edit_note,
+                      size: 18, color: AppColors.primary),
                 ),
               ),
               const SizedBox(height: 8),
@@ -549,7 +709,7 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.assignment, color: Color(0xFF1976D2)),
+                  icon: const Icon(Icons.assignment, color: AppColors.primary),
                   tooltip: 'E-Street Form',
                 ),
                 const SizedBox(width: 4),
@@ -579,23 +739,28 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                           : Icon(isOtherResponder ? Icons.lock : icon),
                       label: Text(
                         ip.isSubmitting
-                            ? 'Updating...'
+                            ? 'UPDATING...'
                             : isOtherResponder
                                 ? 'LOCKED'
-                                : label,
+                                : label.toUpperCase(),
                         style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isOtherResponder ? Colors.grey : color,
+                        backgroundColor: isOtherResponder ? Colors.grey.shade500 : color,
                         disabledBackgroundColor: Colors.grey.shade300,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                        elevation: isOtherResponder ? 0 : 2,
+                        elevation: isOtherResponder ? 0 : 3,
+                        textStyle: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
+                        ),
                       ),
                     ),
                   ),
@@ -638,21 +803,56 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Confirm: $label'),
-        content: Text(message),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        backgroundColor: Colors.white,
+        titlePadding: EdgeInsets.zero,
+        title: Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.primary, AppColors.primaryDark],
+            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'CONFIRM: ${label.toUpperCase()}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        content: Text(message,
+            style: const TextStyle(fontSize: 14, color: AppColors.textPrimary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            child: const Text('CANCEL',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, letterSpacing: 0.5)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.incidentStatusColor(nextStatus),
               foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4)),
             ),
-            child: Text(label),
+            child: Text(label.toUpperCase(),
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, letterSpacing: 1.0)),
           ),
         ],
       ),
@@ -934,32 +1134,48 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
               Container(
                 width: double.infinity,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: sevColor,
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [sevColor, sevColor.withOpacity(0.85)],
+                  ),
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(_typeIcon(type), color: Colors.white, size: 18),
+                    Icon(_typeIcon(type), color: Colors.white, size: 20),
                     const SizedBox(width: 8),
-                    Text(
-                      incNumber,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'monospace',
-                        color: Colors.white,
+                    Expanded(
+                      child: Text(
+                        incNumber.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                          fontFamily: 'monospace',
+                          color: Colors.white,
+                          letterSpacing: 1.5,
+                        ),
                       ),
                     ),
-                    const Spacer(),
                     if (timeStr.isNotEmpty)
-                      Text(
-                        timeStr,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.85),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(
+                          timeStr,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white.withOpacity(0.95),
+                            letterSpacing: 0.3,
+                          ),
                         ),
                       ),
                   ],
@@ -988,8 +1204,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                             title,
                             style: const TextStyle(
                               fontSize: 15,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w700,
                               color: Color(0xFF1E293B),
+                              letterSpacing: 0.2,
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -1054,6 +1271,9 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
           ),
         ),
 
+        // ── Status Progress Bar ──────────────────────────
+        _StatusProgressBar(currentStatus: status),
+
         // ── Location Section ─────────────────────────────
         _SectionCard(
           icon: Icons.location_on,
@@ -1086,8 +1306,21 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () => _openInMaps(lat, lng),
-                  icon: const Icon(Icons.open_in_new, size: 16),
-                  label: const Text('Open in Google Maps'),
+                  icon: const Icon(Icons.map_outlined, size: 16),
+                  label: const Text(
+                    'NAVIGATE TO INCIDENT',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: const BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
+                  ),
                 ),
               ),
             ],
@@ -1279,28 +1512,54 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
                     eTimeStr = timeago.format(DateTime.parse(eTime));
                   } catch (_) {}
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 10),
                     child: Row(
                       children: [
                         Container(
-                          width: 8,
-                          height: 8,
+                          width: 10,
+                          height: 10,
                           decoration: BoxDecoration(
                             color: AppColors.incidentStatusColor(eStatus),
                             shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.incidentStatusColor(eStatus)
+                                    .withOpacity(0.4),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             eStatus.replaceAll('_', ' ').toUpperCase(),
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                              color: AppColors.incidentStatusColor(eStatus),
+                            ),
                           ),
                         ),
-                        Text(eTimeStr,
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            eTimeStr,
                             style: const TextStyle(
-                                fontSize: 11, color: AppColors.textHint)),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -1657,6 +1916,189 @@ class _IncidentDetailScreenState extends State<IncidentDetailScreen> {
   }
 }
 
+// ─── Status Progress Bar ─────────────────────────────────────
+
+class _StatusProgressBar extends StatelessWidget {
+  final String currentStatus;
+
+  const _StatusProgressBar({required this.currentStatus});
+
+  static const _steps = [
+    ('reported', 'REPORTED', Icons.flag_rounded),
+    ('acknowledged', "ACKNOWLEDGED", Icons.check_rounded),
+    ('responding', 'RESPOND', Icons.directions_car_rounded),
+    ('on_scene', 'ON SCENE', Icons.location_on_rounded),
+    ('resolved', 'RESOLVED', Icons.check_circle_rounded),
+  ];
+
+  int get _currentIndex {
+    final idx = _steps.indexWhere(
+        (s) => s.$1 == currentStatus.toLowerCase().replaceAll(' ', '_'));
+    return idx < 0 ? 0 : idx;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = _currentIndex;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.timeline_rounded,
+                    size: 13, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Text(
+                  'INCIDENT PROGRESS',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.5,
+                    color: AppColors.primary.withOpacity(0.8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const double dotSize = 32;
+              const double dotRadius = dotSize / 2;
+              const double labelH = 16.0;
+              const double gap = 5.0;
+              const double totalH = dotSize + gap + labelH;
+              final double stepW = constraints.maxWidth / _steps.length;
+
+              return SizedBox(
+                height: totalH,
+                child: Stack(
+                  children: [
+                    // Connector line — drawn behind circles, vertically centered
+                    Positioned(
+                      top: dotRadius - 1,
+                      left: stepW / 2,
+                      right: stepW / 2,
+                      child: Row(
+                        children: [
+                          for (int i = 0; i < _steps.length - 1; i++)
+                            Expanded(
+                              child: Container(
+                                height: 2,
+                                decoration: BoxDecoration(
+                                  color: i < cur
+                                      ? AppColors.success
+                                      : Colors.grey.shade200,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Circles + labels on top
+                    Row(
+                      children: [
+                        for (int i = 0; i < _steps.length; i++)
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildDot(i, cur, dotSize),
+                                const SizedBox(height: gap),
+                                _buildLabel(i, cur),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDot(int index, int current, double size) {
+    final (statusKey, _, icon) = _steps[index];
+    final isDone = index < current;
+    final isActive = index == current;
+    final stepColor = isActive
+        ? AppColors.incidentStatusColor(statusKey)
+        : isDone
+            ? AppColors.success
+            : Colors.grey.shade300;
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: (isDone || isActive) ? stepColor : Colors.white,
+        shape: BoxShape.circle,
+        border: Border.all(color: stepColor, width: isActive ? 0 : 1.5),
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: stepColor.withOpacity(0.4),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                )
+              ]
+            : null,
+      ),
+      child: Icon(
+        isDone ? Icons.check_rounded : icon,
+        size: isActive ? 17 : 14,
+        color: (isDone || isActive) ? Colors.white : Colors.grey.shade400,
+      ),
+    );
+  }
+
+  Widget _buildLabel(int index, int current) {
+    final (statusKey, label, _) = _steps[index];
+    final isDone = index < current;
+    final isActive = index == current;
+    final color = isActive
+        ? AppColors.incidentStatusColor(statusKey)
+        : isDone
+            ? AppColors.success
+            : Colors.grey.shade400;
+
+    return Text(
+      label,
+      style: TextStyle(
+        fontSize: 8.5,
+        fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+        letterSpacing: 0.4,
+        color: color,
+      ),
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.visible,
+    );
+  }
+}
+
 // ─── Section Card ────────────────────────────────────────────
 
 class _SectionCard extends StatelessWidget {
@@ -1677,7 +2119,14 @@ class _SectionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1685,23 +2134,26 @@ class _SectionCard extends StatelessWidget {
           // Panel header
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(3)),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.primary, AppColors.primaryDark],
+              ),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(3)),
             ),
             child: Row(
               children: [
-                Icon(icon, size: 16, color: AppColors.primary),
+                Icon(icon, size: 14, color: Colors.white.withOpacity(0.9)),
                 const SizedBox(width: 8),
                 Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.grey.shade700,
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: 1.5,
                   ),
                 ),
               ],
@@ -1742,14 +2194,24 @@ class _InfoRow extends StatelessWidget {
           const SizedBox(width: 8),
           SizedBox(
             width: 90,
-            child: Text(label,
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary)),
+            child: Text(
+              label.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+              ),
+            ),
           ),
           Expanded(
             child: Text(
               value.isEmpty ? '—' : value,
-              style: const TextStyle(fontSize: 14),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF1E293B),
+              ),
             ),
           ),
         ],
@@ -1799,7 +2261,7 @@ class _ExpandableInfoState extends State<_ExpandableInfo> {
                 Icon(
                   _expanded ? Icons.expand_less : Icons.expand_more,
                   size: 20,
-                  color: AppColors.textHint,
+                  color: AppColors.primary,
                 ),
               ],
             ),

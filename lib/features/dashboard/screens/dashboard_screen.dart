@@ -6,7 +6,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
+import 'dart:async';
+
 import '../../../core/constants/app_colors.dart';
+import '../../../core/providers/debug_overlay_provider.dart';
 import '../../../core/providers/incident_provider.dart';
 import '../../../core/providers/theme_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
@@ -23,6 +26,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnimation;
+
+  // Secret tap to activate debug overlay (7 taps within 3 seconds)
+  int _secretTapCount = 0;
+  Timer? _secretTapTimer;
 
   @override
   void initState() {
@@ -53,8 +60,37 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
+  void _handleSecretTap() {
+    _secretTapTimer?.cancel();
+    _secretTapCount++;
+    if (_secretTapCount >= 7) {
+      _secretTapCount = 0;
+      context.read<DebugOverlayProvider>().activate();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            '🖥  SYS MONITOR ACTIVATED',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              color: Color(0xFF00FF88),
+            ),
+          ),
+          backgroundColor: const Color(0xFF0E1729),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    _secretTapTimer = Timer(const Duration(seconds: 3), () {
+      _secretTapCount = 0;
+    });
+  }
+
   @override
   void dispose() {
+    _secretTapTimer?.cancel();
     _fadeController.dispose();
     super.dispose();
   }
@@ -236,13 +272,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Text(
-                    'WELCOME BACK,',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.white.withOpacity(0.7),
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 2.0,
+                  // Secret 7-tap zone to activate debug overlay
+                  GestureDetector(
+                    onTap: _handleSecretTap,
+                    behavior: HitTestBehavior.opaque,
+                    child: Text(
+                      'WELCOME BACK,',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withOpacity(0.7),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2.0,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -504,6 +545,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     required List<Map<String, dynamic>> incidents,
   }) {
     HapticFeedback.lightImpact();
+    final isDark = context.read<ThemeProvider>().isDarkMode;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -513,10 +555,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         minChildSize: 0.3,
         maxChildSize: 0.9,
         builder: (_, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF070B14),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            border: Border(top: BorderSide(color: Colors.white10)),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF070B14) : AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(
+              top: BorderSide(
+                color: isDark ? Colors.white10 : AppColors.border,
+              ),
+            ),
           ),
           child: Column(
             children: [
@@ -526,7 +572,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: isDark
+                      ? Colors.white.withOpacity(0.2)
+                      : Colors.black.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -551,17 +599,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                         children: [
                           Text(
                             title,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              color:
+                                  isDark ? Colors.white : AppColors.textPrimary,
                             ),
                           ),
                           Text(
                             '${incidents.length} incident${incidents.length == 1 ? '' : 's'}',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey.shade500,
+                              color: isDark
+                                  ? Colors.grey.shade500
+                                  : AppColors.textSecondary,
                             ),
                           ),
                         ],
@@ -569,13 +620,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     IconButton(
                       icon: Icon(Icons.close_rounded,
-                          color: Colors.white.withOpacity(0.5), size: 22),
+                          color: isDark
+                              ? Colors.white.withOpacity(0.5)
+                              : AppColors.textSecondary,
+                          size: 22),
                       onPressed: () => Navigator.of(ctx).pop(),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: Colors.white.withOpacity(0.1)),
+              Divider(
+                height: 1,
+                color: isDark ? Colors.white.withOpacity(0.1) : AppColors.border,
+              ),
               // Incident list
               Expanded(
                 child: incidents.isEmpty
@@ -584,13 +641,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.inbox_rounded,
-                                size: 48, color: Colors.white.withOpacity(0.2)),
+                                size: 48,
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.2)
+                                    : Colors.black.withOpacity(0.2)),
                             const SizedBox(height: 8),
                             Text(
                               'No incidents',
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.white.withOpacity(0.5),
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.5)
+                                    : AppColors.textSecondary,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -604,7 +666,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                         separatorBuilder: (_, __) => Divider(
                           height: 1,
                           thickness: 1,
-                          color: Colors.grey.shade100,
+                          color: isDark
+                              ? Colors.white.withOpacity(0.08)
+                              : AppColors.border,
                         ),
                         itemBuilder: (_, i) => Container(
                           color: Colors.transparent,
@@ -844,12 +908,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
                 // Body
                 if (ip.isLoading && ip.incidents.isEmpty)
-                  _buildLoadingShimmer()
+                  _buildLoadingShimmer(isDark)
                 else if (ip.incidents
                     .where((i) => !['resolved', 'closed', 'cancelled']
                         .contains((i['status'] ?? '').toString().toLowerCase()))
                     .isEmpty)
-                  _buildEmptyState()
+                  _buildEmptyState(isDark)
                 else
                   _buildIncidentList(ip),
               ],
@@ -860,7 +924,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildLoadingShimmer() {
+  Widget _buildLoadingShimmer(bool isDark) {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -871,7 +935,9 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: Container(
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: isDark
+                    ? Colors.white.withOpacity(0.05)
+                    : Colors.black.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: const Center(
@@ -888,27 +954,31 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 32),
       width: double.infinity,
       child: Column(
         children: [
           Icon(Icons.check_circle_outline_rounded,
-              size: 40, color: Colors.white24),
+              size: 40,
+              color: isDark ? Colors.white24 : Colors.black26),
           const SizedBox(height: 10),
           Text(
             'No active incidents',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: Colors.white70,
+              color: isDark ? Colors.white70 : AppColors.textPrimary,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             'Pull down to refresh',
-            style: TextStyle(fontSize: 12, color: Colors.white54),
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white54 : AppColors.textSecondary,
+            ),
           ),
         ],
       ),
@@ -1051,7 +1121,7 @@ class _StatTileState extends State<_StatTile>
                     children: [
                       // Value
                       widget.isLoading
-                          ? const SizedBox(
+                          ? SizedBox(
                               height: 24,
                               width: 24,
                               child: CircularProgressIndicator(

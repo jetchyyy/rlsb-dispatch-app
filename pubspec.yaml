@@ -84,6 +84,8 @@ dev_dependencies:
   flutter_lints: ^2.0.0
   json_serializable: ^6.7.1
   build_runner: ^2.4.6
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
 
 flutter:
   uses-material-design: true
@@ -93,7 +95,20 @@ flutter:
     - assets/images/body_back.png
     - assets/images/header.jpg
     - assets/images/hero1.png
+    - assets/images/pdrrmo.jpg
     - assets/images/pdrrmologo.png
     - assets/images/pdrrmosplash.png
     - assets/sounds/alarm.wav
     - assets/pdf/terms-v2.pdf
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/pdrrmo.jpg
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/images/pdrrmo.jpg
+  android: true
+  ios: true
+  web: false

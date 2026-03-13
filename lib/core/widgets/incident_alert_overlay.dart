@@ -29,9 +29,14 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
   late final Animation<double> _fadeAnimation;
   late final Animation<Offset> _slideAnimation;
 
+  // Carousel state (used when there are 2+ incidents)
+  late final PageController _pageController;
+  int _currentPage = 0;
+
   @override
   void initState() {
     super.initState();
+    _pageController = PageController();
 
     // ── Red flash ────────────────────────────────────────────
     _flashController = AnimationController(
@@ -70,6 +75,7 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
   void dispose() {
     _flashController.dispose();
     _entranceController.dispose();
+    _pageController.dispose();
     super.dispose();
   }
 
@@ -132,6 +138,8 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
 
   @override
   Widget build(BuildContext context) {
+    final isMultiple = widget.newIncidents.length > 1;
+
     return FadeTransition(
       opacity: _fadeAnimation,
       child: SlideTransition(
@@ -169,9 +177,10 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
 
                         // Title
                         Text(
-                          widget.newIncidents.length == 1
-                              ? 'NEW INCIDENT'
-                              : '${widget.newIncidents.length} NEW INCIDENTS',
+                          isMultiple
+                              ? '${widget.newIncidents.length} NEW INCIDENTS'
+                              : 'NEW INCIDENT',
+                          textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 28,
                             fontWeight: FontWeight.w900,
@@ -182,55 +191,35 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
                             ],
                           ),
                         ),
-                        const SizedBox(height: 24),
 
-                        // Incident cards
-                        ...widget.newIncidents
-                            .take(5)
-                            .map((inc) => _buildIncidentCard(inc)),
-
-                        if (widget.newIncidents.length > 5)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(
-                              '+${widget.newIncidents.length - 5} more',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                              ),
+                        if (isMultiple) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'I-swipe para tan-awon ang matag insidente',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.65),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
+                        ],
 
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 20),
 
-                        // Acknowledge button
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              final firstIncidentId = widget.newIncidents.first['id'] as int;
-                              widget.onAcknowledgeAndOpen(firstIncidentId);
-                            },
-                            icon: const Icon(Icons.check_circle, size: 28),
-                            label: const Text(
-                              'ACKNOWLEDGE & OPEN',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.5,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: Colors.red.shade800,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              elevation: 8,
-                            ),
-                          ),
-                        ),
+                        // ── Carousel (or single card) ─────────────
+                        if (isMultiple)
+                          _buildCarousel()
+                        else
+                          _buildIncidentCard(widget.newIncidents.first),
+
+                        const SizedBox(height: 28),
+
+                        // ── Action buttons ────────────────────────
+                        if (isMultiple)
+                          _buildMultipleButtons()
+                        else
+                          _buildSingleButton(widget.newIncidents.first),
                       ],
                     ),
                   ),
@@ -240,6 +229,153 @@ class _IncidentAlertOverlayState extends State<IncidentAlertOverlay>
           ),
         ),
       ),
+    );
+  }
+
+  /// Carousel used when there are 2+ incidents.
+  Widget _buildCarousel() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Page dots
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(widget.newIncidents.length, (i) {
+            final active = i == _currentPage;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: active ? 20 : 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: active ? Colors.white : Colors.white38,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            );
+          }),
+        ),
+        const SizedBox(height: 8),
+
+        // Page indicator text (e.g., "2 / 3")
+        Text(
+          '${_currentPage + 1} / ${widget.newIncidents.length}',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // Swipeable pages — fixed height so it works inside a Column(min)
+        SizedBox(
+          height: 200,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: widget.newIncidents.length,
+            onPageChanged: (i) => setState(() => _currentPage = i),
+            itemBuilder: (context, i) {
+              return _buildIncidentCard(widget.newIncidents[i]);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Single "ACKNOWLEDGE & OPEN" button for a lone incident.
+  Widget _buildSingleButton(Map<String, dynamic> inc) {
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          final id = inc['id'];
+          if (id != null) widget.onAcknowledgeAndOpen(id as int);
+        },
+        icon: const Icon(Icons.check_circle, size: 28),
+        label: const Text(
+          'ACKNOWLEDGE & OPEN',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.5,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.red.shade800,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 8,
+        ),
+      ),
+    );
+  }
+
+  /// Two buttons shown when there are 2+ incidents:
+  ///   1. "OPEN THIS INCIDENT" → opens the currently visible incident.
+  ///   2. "ACKNOWLEDGE ALL → VIEW LIST" → dismisses overlay, goes to list.
+  Widget _buildMultipleButtons() {
+    final current = widget.newIncidents[_currentPage];
+    return Column(
+      children: [
+        // Open the currently visible incident
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: () {
+              final id = current['id'];
+              if (id != null) widget.onAcknowledgeAndOpen(id as int);
+            },
+            icon: const Icon(Icons.open_in_new, size: 22),
+            label: Text(
+              'OPEN INCIDENT ${_currentPage + 1} OF ${widget.newIncidents.length}',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.red.shade800,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              elevation: 8,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // Acknowledge all and go to incidents list
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            onPressed: widget.onDismiss,
+            icon: const Icon(Icons.list_alt, size: 20, color: Colors.white),
+            label: const Text(
+              'ACKNOWLEDGE ALL — VIEW LIST',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
+                color: Colors.white,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white60, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

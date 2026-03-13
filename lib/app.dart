@@ -11,6 +11,7 @@ import 'core/services/background_service_initializer.dart';
 import 'core/services/workmanager_service.dart';
 import 'core/services/tts_service.dart';
 import 'core/services/geocoding_service.dart';
+import 'core/widgets/debug_floating_button.dart';
 import 'core/widgets/incident_alert_overlay.dart';
 import 'features/admin/screens/dispatcher_tracker_screen.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
@@ -94,12 +95,31 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   void _registerAlarmCallback() {
     final incidentProvider = context.read<IncidentProvider>();
     incidentProvider.alarmService.onNewIncidents = (newIncidents) {
-      if (mounted && !_isAlerting) {
+      if (!mounted) return;
+      if (!_isAlerting) {
+        // No overlay showing yet — start fresh.
         _isAlerting = true;
         setState(() {
           _pendingAlertIncidents = newIncidents;
         });
         _playTtsAnnouncement(newIncidents);
+      } else {
+        // Overlay is already visible. Merge new incidents into the existing
+        // list so they appear in the carousel, and re-announce via TTS.
+        final existing = List<Map<String, dynamic>>.from(
+            _pendingAlertIncidents ?? []);
+        final existingIds =
+            existing.map((e) => e['id']).toSet();
+        final added = newIncidents
+            .where((n) => !existingIds.contains(n['id']))
+            .toList();
+        if (added.isEmpty) return;
+        setState(() {
+          _pendingAlertIncidents = [...existing, ...added];
+        });
+        debugPrint(
+            '🔔 Alarm: ${added.length} additional incident(s) merged into active overlay');
+        _playTtsAnnouncement(added);
       }
     };
   }
@@ -151,9 +171,15 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     _ttsService.stop();
     _ttsService.setCompletionHandler(() {}); // Clear handler
     context.read<IncidentProvider>().alarmService.stopAlarm();
+    final hadMultiple = (_pendingAlertIncidents?.length ?? 0) > 1;
     setState(() {
       _pendingAlertIncidents = null;
     });
+    // When there were multiple incidents, navigate to the list so the
+    // responder can see all of them at a glance.
+    if (hadMultiple) {
+      _goRouter.go('/incidents');
+    }
   }
 
   void _acknowledgeAndOpenIncident(int incidentId) {
@@ -445,6 +471,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
             return Stack(
               children: [
                 child,
+
+                // System-wide debug floating button (activated via dashboard secret tap)
+                const DebugFloatingButton(),
 
                 // Red flash overlay when new incidents arrive
                 if (_pendingAlertIncidents != null &&

@@ -51,6 +51,11 @@ class PreDispatchChecklistApiService {
       MapEntry(
           'checklist_date', checklistDate.toIso8601String().split('T').first),
     );
+    // HH:mm:ss local time of submission
+    final h = checklistDate.hour.toString().padLeft(2, '0');
+    final m = checklistDate.minute.toString().padLeft(2, '0');
+    final s = checklistDate.second.toString().padLeft(2, '0');
+    formData.fields.add(MapEntry('checklist_time', '$h:$m:$s'));
     formData.fields.add(MapEntry('team_members', jsonEncode(teamMembers)));
     formData.fields
         .add(MapEntry('device_time', deviceTime.toUtc().toIso8601String()));
@@ -108,12 +113,28 @@ class PreDispatchChecklistApiService {
 
       if (data != null && data['success'] == true && data['data'] != null) {
         final List<dynamic> users = data['data'];
+
+        // Derive the host from baseUrl (strips /api suffix)
+        final host = ApiConstants.baseUrl.replaceFirst(RegExp(r'/api$'), '');
+
         return users.map((u) {
+          final rawPhoto = u['profile_photo_url']?.toString();
+          String? resolvedPhoto;
+          if (rawPhoto != null && rawPhoto.isNotEmpty) {
+            if (rawPhoto.startsWith('http://') ||
+                rawPhoto.startsWith('https://')) {
+              resolvedPhoto = rawPhoto; // already absolute
+            } else {
+              resolvedPhoto = '$host$rawPhoto'; // prepend host
+            }
+          }
+
           return {
             'id': u['id'].toString(),
             'name': u['name'] ?? 'Unknown',
             'position': u['position'] ?? '',
             'unit': u['unit'] ?? '',
+            'photo_url': resolvedPhoto, // null when no photo
             'isSelected': false,
           };
         }).toList();

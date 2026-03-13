@@ -23,6 +23,7 @@ import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/usecases/login_user.dart';
 import 'features/auth/domain/usecases/logout_user.dart';
+import 'core/providers/debug_overlay_provider.dart';
 import 'features/auth/presentation/providers/auth_provider.dart';
 
 void main() async {
@@ -153,6 +154,9 @@ void main() async {
         ),
         ChangeNotifierProvider.value(
           value: incidentResponseProvider,
+        ),
+        ChangeNotifierProvider(
+          create: (_) => DebugOverlayProvider(),
         ),
       ],
       child: const App(),
