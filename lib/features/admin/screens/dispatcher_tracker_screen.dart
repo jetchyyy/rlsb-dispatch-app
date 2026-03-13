@@ -6,6 +6,18 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/providers/location_tracking_provider.dart';
 
+// ── Dark terminal palette ────────────────────────────────────
+const _kBg = Color(0xFF080D18);           // near-black navy
+const _kSurface = Color(0xFF0E1729);      // panel background
+const _kBorder = Color(0xFF253D6E);       // navy border (visible)
+const _kGreen = Color(0xFF00FF88);        // terminal green
+const _kGreenDim = Color(0xFF00C96A);     // dimmer green
+const _kAmber = Color(0xFFFFB300);        // amber accent
+const _kCyan = Color(0xFF00D4FF);         // info cyan
+const _kRed = Color(0xFFFF4444);          // error red
+const _kLabel = Color(0xFF7EB3E8);        // bright blue-grey label
+const _kValue = Color(0xFFE8F0FF);        // bright cool white value
+
 /// Hidden admin screen to monitor device location tracking.
 /// Accessible by tapping "Roles" 10 times on the profile screen.
 class DispatcherTrackerScreen extends StatefulWidget {
@@ -22,7 +34,6 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
   @override
   void initState() {
     super.initState();
-    // Force UI refresh every second to show live updates
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 1),
       (_) => setState(() {}),
@@ -42,148 +53,204 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
     final mode = tracker.mode;
 
     return Scaffold(
+      backgroundColor: _kBg,
       appBar: AppBar(
-        title: const Text('Dispatcher Tracker'),
         backgroundColor: AppColors.primaryDark,
         foregroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        toolbarHeight: 72,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.primary, AppColors.primaryDark],
+            ),
+            image: DecorationImage(
+              image: AssetImage('assets/images/header.jpg'),
+              fit: BoxFit.cover,
+              opacity: 0.18,
+            ),
+          ),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'ADMIN CONSOLE',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.white.withOpacity(0.6),
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2.5,
+              ),
+            ),
+            const SizedBox(height: 2),
+            const Text(
+              'LOCATION TRACKING MONITOR',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: () => setState(() {}),
             tooltip: 'Refresh',
           ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Admin Mode Banner ────────────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.warning),
-              ),
+            // ── System boot banner ───────────────────────────────
+            _TerminalBanner(
+              icon: Icons.admin_panel_settings,
+              message: 'PRIVILEGED ACCESS — FOR AUTHORIZED PERSONNEL ONLY',
+              color: _kAmber,
+            ),
+            const SizedBox(height: 14),
+
+            // ── Tracking Status ──────────────────────────────────
+            _TerminalCard(
+              title: 'TRACKING STATUS',
+              prefixChar: '01',
+              accentColor: _getTrackingColor(mode),
+              icon: _getTrackingIcon(mode),
+              children: [
+                _TRow('MODE', mode.name.toUpperCase(),
+                    valueColor: _getTrackingColor(mode)),
+                _TRow('IS TRACKING', tracker.isTracking ? 'YES' : 'NO',
+                    valueColor:
+                        tracker.isTracking ? _kGreen : _kRed),
+                if (tracker.activeIncidentId != null)
+                  _TRow('ACTIVE INCIDENT',
+                      '#${tracker.activeIncidentId}',
+                      valueColor: _kAmber),
+                _TRow('PENDING UPLOADS', '${tracker.pendingUpdates}',
+                    valueColor: tracker.pendingUpdates > 0
+                        ? _kAmber
+                        : _kGreenDim),
+                if (tracker.errorMessage != null)
+                  _TRow('ERROR', tracker.errorMessage!,
+                      valueColor: _kRed),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // ── GPS Position ─────────────────────────────────────
+            _TerminalCard(
+              title: 'LAST KNOWN POSITION',
+              prefixChar: '02',
+              accentColor:
+                  position != null ? _kGreen : _kRed,
+              icon: Icons.location_on,
+              children: position != null
+                  ? [
+                      _TRow('LATITUDE',
+                          position.latitude.toStringAsFixed(6)),
+                      _TRow('LONGITUDE',
+                          position.longitude.toStringAsFixed(6)),
+                      _TRow('ACCURACY',
+                          '${position.accuracy.toStringAsFixed(1)} m'),
+                      _TRow('ALTITUDE',
+                          '${position.altitude.toStringAsFixed(1)} m'),
+                      _TRow('SPEED',
+                          '${position.speed.toStringAsFixed(2)} m/s'),
+                      _TRow('HEADING',
+                          '${position.heading.toStringAsFixed(1)}°'),
+                      _TRow('TIMESTAMP',
+                          _formatTimestamp(position.timestamp),
+                          valueColor: _kCyan),
+                    ]
+                  : [
+                      _TRow('STATUS', 'NO POSITION CAPTURED',
+                          valueColor: _kRed),
+                    ],
+            ),
+            const SizedBox(height: 12),
+
+            // ── Configuration ────────────────────────────────────
+            const _TerminalCard(
+              title: 'TRACKING CONFIG',
+              prefixChar: '03',
+              accentColor: _kCyan,
+              icon: Icons.tune,
+              children: [
+                _TRow('PASSIVE INTERVAL', '10 SECONDS'),
+                _TRow('ACTIVE INTERVAL', '5 SECONDS'),
+                _TRow('BATCH FLUSH INTERVAL', '30 SECONDS'),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── Controls header ──────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
               child: Row(
                 children: [
-                  const Icon(Icons.admin_panel_settings,
-                      color: AppColors.warning),
+                  Container(
+                    width: 3,
+                    height: 18,
+                    color: _kGreen,
+                  ),
                   const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Admin Mode — Location Tracking Monitor',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
+                  const Text(
+                    'MANUAL CONTROLS',
+                    style: TextStyle(
+                      color: _kGreen,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.0,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
 
-            // ── Tracking Status Card ─────────────────────────────
-            _StatusCard(
-              title: 'Tracking Status',
-              icon: _getTrackingIcon(mode),
-              iconColor: _getTrackingColor(mode),
-              children: [
-                _InfoRow('Mode', mode.name.toUpperCase()),
-                _InfoRow('Is Tracking', tracker.isTracking ? 'Yes' : 'No'),
-                if (tracker.activeIncidentId != null)
-                  _InfoRow(
-                      'Active Incident', '#${tracker.activeIncidentId}'),
-                _InfoRow('Pending Uploads', '${tracker.pendingUpdates}'),
-                if (tracker.errorMessage != null)
-                  _InfoRow('Error', tracker.errorMessage!,
-                      valueColor: AppColors.error),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // ── Current Position Card ────────────────────────────
-            _StatusCard(
-              title: 'Last Known Position',
-              icon: Icons.location_on,
-              iconColor: position != null ? AppColors.success : AppColors.error,
-              children: position != null
-                  ? [
-                      _InfoRow('Latitude',
-                          position.latitude.toStringAsFixed(6)),
-                      _InfoRow('Longitude',
-                          position.longitude.toStringAsFixed(6)),
-                      _InfoRow('Accuracy',
-                          '${position.accuracy.toStringAsFixed(1)} m'),
-                      _InfoRow(
-                          'Altitude', '${position.altitude.toStringAsFixed(1)} m'),
-                      _InfoRow(
-                          'Speed', '${position.speed.toStringAsFixed(2)} m/s'),
-                      _InfoRow('Heading',
-                          '${position.heading.toStringAsFixed(1)}°'),
-                      _InfoRow(
-                          'Timestamp',
-                          _formatTimestamp(position.timestamp)),
-                    ]
-                  : [
-                      const _InfoRow('Status', 'No position captured yet'),
-                    ],
-            ),
-            const SizedBox(height: 16),
-
-            // ── Tracking Intervals Card ──────────────────────────
-            _StatusCard(
-              title: 'Tracking Configuration',
-              icon: Icons.timer,
-              iconColor: AppColors.info,
-              children: const [
-                _InfoRow('Passive Interval', '10 seconds'),
-                _InfoRow('Active Interval', '5 seconds'),
-                _InfoRow('Batch Flush Interval', '30 seconds'),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // ── Manual Controls ──────────────────────────────────
-            Text(
-              'Manual Controls',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 12),
+            // ── Control buttons ──────────────────────────────────
             Row(
               children: [
                 Expanded(
-                  child: _ControlButton(
-                    label: 'Start Passive',
+                  child: _TacticalButton(
+                    label: 'START PASSIVE',
                     icon: Icons.play_arrow,
-                    color: AppColors.success,
+                    color: _kGreen,
                     onPressed: mode == TrackingMode.passive
                         ? null
                         : () => tracker.startPassiveTracking(),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: _ControlButton(
-                    label: 'Stop All',
+                  child: _TacticalButton(
+                    label: 'STOP ALL',
                     icon: Icons.stop,
-                    color: AppColors.error,
+                    color: _kRed,
                     onPressed: mode == TrackingMode.off
                         ? null
                         : () => tracker.stopAllTracking(),
                   ),
                 ),
-                const SizedBox(width: 12),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
                 Expanded(
-                  child: _ControlButton(
-                    label: 'Force Flush Batch',
+                  child: _TacticalButton(
+                    label: 'FLUSH BATCH',
                     icon: Icons.cloud_upload,
-                    color: AppColors.info,
+                    color: _kCyan,
                     onPressed: tracker.pendingUpdates == 0
                         ? null
                         : () async {
@@ -192,16 +259,21 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
                           },
                   ),
                 ),
+                if (mode == TrackingMode.active) ...
+                  [
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _TacticalButton(
+                        label: 'REVERT PASSIVE',
+                        icon: Icons.arrow_back,
+                        color: _kAmber,
+                        onPressed: () => tracker.stopActiveTracking(),
+                      ),
+                    ),
+                  ],
               ],
             ),
-            const SizedBox(height: 12),
-            if (mode == TrackingMode.active)
-              _ControlButton(
-                label: 'Revert to Passive',
-                icon: Icons.arrow_back,
-                color: AppColors.warning,
-                onPressed: () => tracker.stopActiveTracking(),
-              ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -222,11 +294,11 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
   Color _getTrackingColor(TrackingMode mode) {
     switch (mode) {
       case TrackingMode.off:
-        return AppColors.error;
+        return _kRed;
       case TrackingMode.passive:
-        return AppColors.info;
+        return _kCyan;
       case TrackingMode.active:
-        return AppColors.success;
+        return _kGreen;
     }
   }
 
@@ -235,9 +307,9 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
     final diff = now.difference(timestamp);
 
     if (diff.inSeconds < 60) {
-      return '${diff.inSeconds}s ago';
+      return '${diff.inSeconds}s AGO';
     } else if (diff.inMinutes < 60) {
-      return '${diff.inMinutes}m ago';
+      return '${diff.inMinutes}m AGO';
     } else {
       return '${timestamp.hour.toString().padLeft(2, '0')}:'
           '${timestamp.minute.toString().padLeft(2, '0')}:'
@@ -246,80 +318,208 @@ class _DispatcherTrackerScreenState extends State<DispatcherTrackerScreen> {
   }
 }
 
-// ── Helper Widgets ───────────────────────────────────────────
+// ── Terminal Banner ──────────────────────────────────────────
 
-class _StatusCard extends StatelessWidget {
-  final String title;
+class _TerminalBanner extends StatelessWidget {
   final IconData icon;
-  final Color iconColor;
+  final String message;
+  final Color color;
+
+  const _TerminalBanner({
+    required this.icon,
+    required this.message,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          // Blinking cursor indicator (static — actual blink would need AnimationController)
+          Text(
+            '█',
+            style: TextStyle(color: color, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Terminal Card ────────────────────────────────────────────
+
+class _TerminalCard extends StatelessWidget {
+  final String title;
+  final String prefixChar;
+  final Color accentColor;
+  final IconData icon;
   final List<Widget> children;
 
-  const _StatusCard({
+  const _TerminalCard({
     required this.title,
+    required this.prefixChar,
+    required this.accentColor,
     required this.icon,
-    required this.iconColor,
     required this.children,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: iconColor, size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: _kBorder),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withOpacity(0.08),
+            blurRadius: 12,
+            spreadRadius: 0,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left accent stripe
+              Container(width: 4, color: accentColor),
+              // Card body
+              Expanded(
+                child: Container(
+                  color: _kSurface,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header bar
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        color: AppColors.primary.withOpacity(0.55),
+                        child: Row(
+                          children: [
+                            Text(
+                              '[$prefixChar] ',
+                              style: TextStyle(
+                                color: accentColor.withOpacity(0.6),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.0,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            Icon(icon, color: accentColor, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              title,
+                              style: TextStyle(
+                                color: accentColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 1.8,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Divider line
+                      Container(height: 1, color: _kBorder),
+                      // Content
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        child: Column(children: children),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-            const Divider(height: 24),
-            ...children,
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _InfoRow extends StatelessWidget {
+// ── Terminal Row ─────────────────────────────────────────────
+
+class _TRow extends StatelessWidget {
   final String label;
   final String value;
   final Color? valueColor;
 
-  const _InfoRow(this.label, this.value, {this.valueColor});
+  const _TRow(this.label, this.value, {this.valueColor});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // Prompt prefix
           Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 14,
+            '> ',
+            style: TextStyle(
+              color: _kGreen.withOpacity(0.5),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'monospace',
             ),
           ),
-          Text(
-            value,
+          // Label
+          SizedBox(
+            width: 148,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: _kLabel,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          const Text(
+            ':  ',
             style: TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 14,
-              color: valueColor ?? AppColors.textPrimary,
+              color: _kLabel,
+              fontSize: 11,
+            ),
+          ),
+          // Value
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? _kValue,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'monospace',
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -328,13 +528,15 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _ControlButton extends StatelessWidget {
+// ── Tactical Button ──────────────────────────────────────────
+
+class _TacticalButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
   final VoidCallback? onPressed;
 
-  const _ControlButton({
+  const _TacticalButton({
     required this.label,
     required this.icon,
     required this.color,
@@ -343,18 +545,40 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        disabledBackgroundColor: color.withOpacity(0.3),
-        disabledForegroundColor: Colors.white70,
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+    final isEnabled = onPressed != null;
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: BoxDecoration(
+          color: isEnabled
+              ? color.withOpacity(0.12)
+              : color.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: isEnabled ? color.withOpacity(0.7) : color.withOpacity(0.2),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: isEnabled ? color : color.withOpacity(0.3),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isEnabled ? color : color.withOpacity(0.3),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
         ),
       ),
     );

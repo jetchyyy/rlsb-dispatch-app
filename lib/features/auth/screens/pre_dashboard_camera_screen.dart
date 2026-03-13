@@ -30,6 +30,8 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
   List<Map<String, dynamic>> _teamMembers = [];
   bool _isLoadingTeam = true;
   String _searchQuery = '';
+  // null = show both ASSERT units
+  String? _unitFilter;
 
   @override
   void initState() {
@@ -732,7 +734,7 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
       children: [
         // Central User Photo
         Expanded(
-          flex: 3,
+          flex: 2,
           child: Center(
             child: Container(
               width: 260, // Better portrait aspect ratio
@@ -824,7 +826,7 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
         const SizedBox(height: 16),
         // Team Members Selection
         Expanded(
-          flex: 2,
+          flex: 3,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -863,7 +865,21 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+              // ── Filter Chips ──
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildFilterChip(null, 'All ASSERT'),
+                    const SizedBox(width: 6),
+                    _buildFilterChip('PDRRMO-ASSERT', 'ASSERT'),
+                    const SizedBox(width: 6),
+                    _buildFilterChip('PDRRMO-ASSERT IAO', 'ASSERT IAO'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
               // ── Search Bar ──
               TextField(
                 onChanged: (val) => setState(() => _searchQuery = val),
@@ -908,12 +924,60 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
     );
   }
 
+  Widget _buildFilterChip(String? value, String label) {
+    final active = _unitFilter == value;
+    return GestureDetector(
+      onTap: () => setState(() => _unitFilter = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? AppColors.primary : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active ? AppColors.primary : Colors.grey.shade300,
+          ),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.25),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  )
+                ]
+              : [],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: active ? Colors.white : Colors.grey.shade600,
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Grouped + Grid team member selector ──
   Widget _buildGroupedMemberGrid() {
-    // 1. Filter the entire list based on search query
+    // Only show PDRRMO-ASSERT and PDRRMO-ASSERT IAO, respect active filter
+    const allowedUnits = {'PDRRMO-ASSERT', 'PDRRMO-ASSERT IAO'};
+
+    // 1. Pre-filter to allowed units + active unit filter
+    final assertMembers = _teamMembers.where((m) {
+      final unit = (m['unit'] as String? ?? '').trim();
+      if (_unitFilter != null) {
+        return unit.toUpperCase() == _unitFilter!.toUpperCase();
+      }
+      return allowedUnits
+          .any((u) => u.toUpperCase() == unit.toUpperCase());
+    }).toList();
+
     final filteredMembers = _searchQuery.isEmpty
-        ? _teamMembers
-        : _teamMembers.where((m) {
+        ? assertMembers
+        : assertMembers.where((m) {
             final name = (m['name'] as String? ?? '').toLowerCase();
             final pos = (m['position'] as String? ?? '').toLowerCase();
             final unit = (m['unit'] as String? ?? '').toLowerCase();
@@ -923,199 +987,227 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                 unit.contains(search);
           }).toList();
 
-    // 2. Build a sorted map of unit → list of (globalIndex, member)
-    final Map<String, List<MapEntry<int, Map<String, dynamic>>>> grouped = {};
-    for (int i = 0; i < filteredMembers.length; i++) {
-      final member = filteredMembers[i];
-      // Note: we still need the original global index for `_toggleMemberSelection`
-      final globalIndex = _teamMembers.indexOf(member);
+    if (filteredMembers.isEmpty) {
+      return Center(
+        child: Text(
+          _searchQuery.isNotEmpty
+              ? 'No partners match your search.'
+              : 'No ASSERT partners found.',
+          style: TextStyle(color: Colors.grey.shade600),
+        ),
+      );
+    }
 
+    // 2. Group by unit: PDRRMO-ASSERT before PDRRMO-ASSERT IAO
+    final Map<String, List<MapEntry<int, Map<String, dynamic>>>> grouped = {};
+    for (final member in filteredMembers) {
+      final globalIndex = _teamMembers.indexOf(member);
       final unit = (member['unit'] as String? ?? '').trim();
-      final key = unit.isEmpty ? 'No Unit' : unit;
-      grouped.putIfAbsent(key, () => []).add(MapEntry(globalIndex, member));
+      grouped.putIfAbsent(unit, () => []).add(MapEntry(globalIndex, member));
     }
     final sortedUnits = grouped.keys.toList()
       ..sort((a, b) {
-        // Prioritize ASSERT units to the top
-        final aIsAssert = a.toUpperCase().contains('ASSERT');
-        final bIsAssert = b.toUpperCase().contains('ASSERT');
-        if (aIsAssert && !bIsAssert) return -1;
-        if (!aIsAssert && bIsAssert) return 1;
-        // Otherwise alphabetical
+        final aIsIao = a.toUpperCase().contains('IAO');
+        final bIsIao = b.toUpperCase().contains('IAO');
+        if (!aIsIao && bIsIao) return -1;
+        if (aIsIao && !bIsIao) return 1;
         return a.compareTo(b);
       });
 
-    return SizedBox(
-      height: 250, // Fixed height for the horizontal scrolling row of cards
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 8, right: 16),
-        itemCount: sortedUnits.length,
-        itemBuilder: (context, groupIndex) {
-          final unitLabel = sortedUnits[groupIndex];
-          final members = grouped[unitLabel]!;
-          final selectedInGroup =
-              members.where((e) => e.value['isSelected'] == true).length;
+    return ListView.builder(
+      itemCount: sortedUnits.length,
+      itemBuilder: (context, groupIndex) {
+        final unitLabel = sortedUnits[groupIndex];
+        final members = grouped[unitLabel]!;
+        final selectedInGroup =
+            members.where((e) => e.value['isSelected'] == true).length;
 
-          return Container(
-            width: 280, // Fixed width for each Unit Card
-            margin: const EdgeInsets.only(right: 16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200, width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // ── Unit Card Header ──
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.05),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(15),
-                      topRight: Radius.circular(15),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Unit Section Header ──
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppColors.primary.withOpacity(0.3),
+                      ),
                     ),
-                    border: Border(
-                      bottom: BorderSide(color: Colors.grey.shade100),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.local_hospital_outlined,
-                          size: 16, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      // Unit Name
-                      Expanded(
-                        child: Text(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.shield_outlined,
+                            size: 13, color: AppColors.primary),
+                        const SizedBox(width: 5),
+                        Text(
                           unitLabel,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                             color: AppColors.primary,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (selectedInGroup > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$selectedInGroup selected',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      // Selection Badge for this unit
-                      if (selectedInGroup > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '$selectedInGroup ✓',
-                            style: const TextStyle(
-                                fontSize: 10,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold),
-                          ),
-                        )
-                      else
-                        Text(
-                          '${members.length}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade500,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                // ── Unit Card Body (Scrollable Members List) ──
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    itemCount: members.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (context, idx) {
-                      final globalIndex = members[idx].key;
-                      final member = members[idx].value;
-                      return _buildMemberRow(globalIndex, member);
-                    },
-                  ),
-                ),
-              ],
+                    )
+                  else
+                    Text(
+                      '${members.length} members',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
             ),
-          );
-        },
-      ),
+            // ── Member Cards Grid ──
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 0.68,
+              ),
+              itemCount: members.length,
+              itemBuilder: (context, idx) {
+                return _buildMemberCard(members[idx].key, members[idx].value);
+              },
+            ),
+            if (groupIndex < sortedUnits.length - 1)
+              const SizedBox(height: 18),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildMemberRow(int globalIndex, Map<String, dynamic> member) {
+  Widget _buildMemberCard(int globalIndex, Map<String, dynamic> member) {
     final isSelected = member['isSelected'] as bool? ?? false;
     final String name = member['name'] as String? ?? '';
     final String position = member['position'] as String? ?? '';
+    final String? photoUrl = member['photo_url'] as String?;
 
-    // First-name initial for the avatar badge
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    // First name only for compactness
+    final displayName = name.split(' ').first;
 
     return GestureDetector(
       onTap: () => _toggleMemberSelection(globalIndex),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+        duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color:
               isSelected ? AppColors.primary.withOpacity(0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? AppColors.primary : Colors.grey.shade200,
-            width: isSelected ? 1.5 : 1.0,
+            width: isSelected ? 2.0 : 1.0,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: isSelected
+                  ? AppColors.primary.withOpacity(0.18)
+                  : Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Avatar initial circle
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isSelected ? AppColors.primary : Colors.grey.shade100,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                initial,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: isSelected ? Colors.white : Colors.grey.shade500,
-                ),
+            // ── Avatar fills most of the card ──
+            Expanded(
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: photoUrl != null
+                          ? Image.network(
+                              photoUrl,
+                              width: double.infinity,
+                              height: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  _personPlaceholder(isSelected),
+                              loadingBuilder: (_, child, progress) {
+                                if (progress == null) return child;
+                                return _personPlaceholder(isSelected);
+                              },
+                            )
+                          : _personPlaceholder(isSelected),
+                    ),
+                  ),
+                  if (isSelected)
+                    Positioned(
+                      bottom: 2,
+                      right: 2,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: const Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 11,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(width: 10),
-            // Name + position
-            Expanded(
+            // ── Compact name row ──
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    name,
+                    displayName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 12.5,
+                      fontSize: 10.5,
                       fontWeight:
                           isSelected ? FontWeight.bold : FontWeight.w600,
                       color: isSelected
@@ -1128,20 +1220,14 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                       position,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 8.5,
                         color: Colors.grey.shade500,
-                        fontWeight: FontWeight.w500,
                       ),
                     ),
                 ],
               ),
-            ),
-            // Tick
-            Icon(
-              isSelected ? Icons.check_circle_rounded : Icons.circle_outlined,
-              size: 20,
-              color: isSelected ? AppColors.primary : Colors.grey.shade300,
             ),
           ],
         ),
@@ -1266,6 +1352,21 @@ class _PreDashboardCameraScreenState extends State<PreDashboardCameraScreen> {
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _personPlaceholder(bool isSelected) {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      color: isSelected
+          ? AppColors.primary.withOpacity(0.12)
+          : Colors.grey.shade100,
+      child: Icon(
+        Icons.person,
+        size: 36,
+        color: isSelected ? AppColors.primary : Colors.grey.shade400,
+      ),
     );
   }
 
